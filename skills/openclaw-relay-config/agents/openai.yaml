@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenClaw 中转 API 配置"
+  short_description: "收集参数、检查重名后执行 OpenClaw relay 配置或删除"
+  default_prompt: "使用 $openclaw-relay-config 先收集中转参数、推导 providerId 和 API key 变量名、检查重名与模型可用性，再执行 OpenClaw relay 的配置或删除脚本。"
