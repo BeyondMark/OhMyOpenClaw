@@ -18,6 +18,8 @@
 - 目录：`skills/openclaw-relay-config/`
 - 人类说明：`skills/openclaw-relay-config/README.md`
 - 作用：为 `~/.openclaw/openclaw.json` 新增、更新、验证或删除 relay provider
+- 规则：先确认模型与协议，再从官方文档核实 `contextWindow` / `maxTokens`，把数值显式传给脚本；`configure_relay.sh` 不负责猜测这些 limits
+- 降级：优先用 `exa` / `context7` 拉官方文档；如果没有这些工具，退回到用户提供的官方链接或当前平台原生网页搜索/浏览能力；拿不到官方来源时停止执行
 - 入口脚本：
   - `scripts/configure_relay.sh`
   - `scripts/check_relay_model.sh`
@@ -30,6 +32,16 @@
 - 作用：排查并修复 OpenClaw 升级后 gateway 无限重启、阻塞启动或 `gateway.mode` 缺失问题
 - 入口脚本：
   - `scripts/fix_gateway_mode.sh`
+
+### `openclaw-agent-browser-install`
+
+- 目录：`skills/openclaw-agent-browser-install/`
+- 人类说明：`skills/openclaw-agent-browser-install/README.md`
+- 作用：检测 Claude Code、Codex、OpenClaw 的安装情况，并为选定目标安装、配置、验证 `agent-browser`
+- 入口脚本：
+  - `scripts/detect_supported_tools.sh`
+  - `scripts/install_agent_browser.sh`
+  - `scripts/verify_agent_browser.sh`
 
 ## 说明
 
