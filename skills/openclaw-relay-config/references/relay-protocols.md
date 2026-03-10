@@ -114,4 +114,4 @@ openclaw status
   - 优先用 `scripts/check_relay_model.sh`
 - `anthropic-messages` / `google-generative-ai`
   - 通用 `GET /models` 不可靠
-  - 需要结合文档判断，必要时用 `exa` / `context7` 辅助确认
+  - 需要结合文档判断；如果当前平台提供 `exa` / `context7` 等文档搜索工具，可辅助确认

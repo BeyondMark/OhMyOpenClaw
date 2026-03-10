@@ -11,6 +11,8 @@ Use this skill to diagnose upgrade-related OpenClaw gateway failures where the s
 
 Follow the workflow in order. Prefer the bundled script for deterministic repair, then verify with `openclaw status` and recent logs.
 
+When referring to bundled files, resolve paths relative to this skill directory. Do not assume a user-specific install path.
+
 ## Workflow
 
 1. Inspect the active symptom before changing anything.
@@ -30,13 +32,7 @@ tail -n 40 ~/.openclaw/logs/gateway.log
 ./scripts/fix_gateway_mode.sh
 ```
 
-4. If running from another working directory, call it with an absolute path:
-
-```bash
-/Users/mark/.codex/skills/openclaw-gateway-repair/scripts/fix_gateway_mode.sh
-```
-
-5. Confirm the repair:
+4. Confirm the repair:
 
 ```bash
 openclaw config get gateway.mode
@@ -45,7 +41,7 @@ openclaw status
 launchctl print gui/$(id -u)/ai.openclaw.gateway | sed -n '1,120p'
 ```
 
-6. If `gateway.mode` is already `local` but the gateway still fails, read `references/restart-loop.md` and continue from the fallback checks there instead of guessing.
+5. If `gateway.mode` is already `local` but the gateway still fails, read `references/restart-loop.md` and continue from the fallback checks there instead of guessing.
 
 ## Expected Healthy State
 

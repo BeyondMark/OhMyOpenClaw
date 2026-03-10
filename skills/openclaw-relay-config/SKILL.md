@@ -9,6 +9,8 @@ description: "Configure or remove OpenClaw relay providers in ~/.openclaw/opencl
 
 Use this skill when OpenClaw needs a relay or proxy model provider.
 
+When referring to bundled files, resolve paths relative to this skill directory. Do not assume a user-specific install path.
+
 This skill owns the decision-making layer:
 
 - collect missing inputs from the user
@@ -92,7 +94,7 @@ Interpretation:
 If the protocol is `anthropic-messages` or `google-generative-ai`, generic probing is not reliable. In those cases:
 
 - use provider docs first
-- use `exa` and `context7` if protocol behavior is uncertain
+- use documentation search tools such as `exa` or `context7` only if the current platform provides them
 - if docs remain ambiguous, tell the user that the model list cannot be safely verified from the generic probe path
 
 ## Add or Update Flow
