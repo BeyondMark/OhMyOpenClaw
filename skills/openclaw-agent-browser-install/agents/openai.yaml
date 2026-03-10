@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Browser 安装"
+  short_description: "检测 Claude Code、Codex、OpenClaw 并安装验证 agent-browser"
+  default_prompt: "使用 $openclaw-agent-browser-install 先检测系统里是否安装了 Claude Code CLI、Codex CLI 或 OpenClaw；如果存在多个目标，在聊天中询问我要装到哪个工具；然后执行 agent-browser 的安装和验证脚本。"
