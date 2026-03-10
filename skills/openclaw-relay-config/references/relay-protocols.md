@@ -61,8 +61,8 @@
             reasoning: false,
             input: ["text"],
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: 128000,
-            maxTokens: 16384,
+            contextWindow: 1050000,
+            maxTokens: 128000,
           },
         ],
       },
@@ -70,6 +70,10 @@
   },
 }
 ```
+
+如果示例模型是 `gpt-5.4` 或 `gpt-5.4-pro`，上面的 `1050000 / 128000` 可直接使用。
+如果是其它模型，先查官方规格，不要沿用这个示例值。
+在 skill 流程里，先定模型，再用官方文档配合 `exa` / `context7` 查出 `contextWindow` / `maxTokens`，最后显式传给执行脚本。
 
 ## 不要误判成“版本号配置”
 - 模型中转这里没有单独的 `apiVersion` 或 `protocolVersion` 配置项。
@@ -112,6 +116,9 @@ openclaw status
 ## 模型探测规则
 - `openai-responses` / `openai-completions`
   - 优先用 `scripts/check_relay_model.sh`
+  - 通过模型存在性探测后，再用官方文档确认 `contextWindow` / `maxTokens`
 - `anthropic-messages` / `google-generative-ai`
   - 通用 `GET /models` 不可靠
   - 需要结合文档判断；如果当前平台提供 `exa` / `context7` 等文档搜索工具，可辅助确认
+  - 如果没有这些工具，退回到用户提供的官方文档链接，或当前平台原生网页搜索/浏览能力
+  - 如果拿不到官方来源，就不要猜测 `contextWindow` / `maxTokens`

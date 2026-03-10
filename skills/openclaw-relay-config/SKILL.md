@@ -91,11 +91,62 @@ Interpretation:
 - exit `3`: endpoint does not expose a recognizable list, stop unless you have provider docs proving the model/protocol pair
 - exit `4`: model not found, tell the user and do not write config
 
+After model existence is confirmed, resolve the model limits from official docs before writing config:
+
+- prefer the vendor's official model page or comparison table
+- use `exa` / `context7` when available to pull those docs into the current session
+- if `exa` / `context7` are unavailable, use a user-provided official doc link or the current platform's native web browsing/search capability
+- record the exact `contextWindow` and `maxTokens` you verified
+- always pass explicit `--context-window` and `--max-tokens` into the execution script
+
+Do not let `scripts/configure_relay.sh` guess these values. That script is execution-only and should receive final numbers from the skill layer.
+
+If you cannot access an official source at all, stop and tell the user you cannot safely verify the limits. Do not guess and do not write config with assumed numbers.
+
+Use this fixed sequence:
+
+1. confirm the model id and protocol
+2. probe model existence with `./scripts/check_relay_model.sh` when the protocol supports it
+3. fetch official documentation with `exa` / `context7`; if unavailable, fall back to a user-provided official link or native web browsing/search
+4. extract `contextWindow` and `maxTokens`
+5. show the user the resolved limits and the source links
+6. only then call `./scripts/configure_relay.sh`
+
+User-facing summary template before execution:
+
+```text
+已确认模型: <model-id>
+协议: <api>
+官方规格:
+- contextWindow: <N>
+- maxTokens: <N>
+来源:
+- <official-link-1>
+- <official-link-2>
+接下来将把这两个值显式传给 configure_relay.sh。
+```
+
+Execution template:
+
+```bash
+./scripts/configure_relay.sh \
+  --provider-id <provider-id> \
+  --api-key-env <API_KEY_ENV> \
+  --base-url <base-url> \
+  --api <api> \
+  --model-id <model-id> \
+  --model-name "<model-name>" \
+  --context-window <context-window> \
+  --max-tokens <max-tokens> \
+  --api-key-value "<api-key>"
+```
+
 If the protocol is `anthropic-messages` or `google-generative-ai`, generic probing is not reliable. In those cases:
 
 - use provider docs first
 - use documentation search tools such as `exa` or `context7` only if the current platform provides them
-- if docs remain ambiguous, tell the user that the model list cannot be safely verified from the generic probe path
+- if those tools are unavailable, use a user-provided official link or native web browsing/search
+- if docs remain ambiguous or inaccessible, tell the user that the model list or limits cannot be safely verified from the generic probe path
 
 ## Add or Update Flow
 
@@ -109,6 +160,8 @@ When the values are final, run:
   --api openai-responses \
   --model-id gpt-5.4 \
   --model-name "GPT-5.4" \
+  --context-window 1050000 \
+  --max-tokens 128000 \
   --api-key-value "sk-xxxx"
 ```
 

@@ -46,14 +46,46 @@
             reasoning: false,
             input: ["text"],
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: 128000,
-            maxTokens: 16384,
+            contextWindow: 1050000,
+            maxTokens: 128000,
           },
         ],
       },
     },
   },
 }
+```
+
+说明：
+
+- 上面这组 `1050000 / 128000` 适用于 `gpt-5.4` 与 `gpt-5.4-pro`
+- 这些数值已按 `2026-03-10` 的 OpenAI 官方模型页面与 compare models 页面核对
+- 其它模型不要照抄这个例子，先查该模型的官方规格，再写入 `contextWindow` / `maxTokens`
+- 在 skill 流程里应先选定模型，再用官方文档配合 `exa` / `context7` 查出 limits，然后把数值显式传给脚本
+- 如果没有 `exa` / `context7`，就退回到用户提供的官方文档链接，或当前平台自带的网页搜索/浏览能力
+- 如果连官方来源都拿不到，就应停止执行，不要猜测 limits
+
+推荐流程模板：
+
+1. 先确认 `model_id` 和 `api`
+2. 对 `openai-responses` / `openai-completions` 先跑 `scripts/check_relay_model.sh`
+3. 再用官方文档配合 `exa` / `context7` 查 `contextWindow` 和 `maxTokens`
+   如果这两个工具不可用，退回到用户提供的官方文档链接，或当前平台可用的网页搜索/浏览能力
+4. 先把数值和来源回显给用户
+5. 最后把两个值显式传给 `scripts/configure_relay.sh`
+
+回显示例：
+
+```text
+已确认模型: gpt-5.4
+协议: openai-responses
+官方规格:
+- contextWindow: 1050000
+- maxTokens: 128000
+来源:
+- https://developers.openai.com/api/docs/models/gpt-5.4
+- https://developers.openai.com/api/docs/models/compare
+接下来将把这两个值显式传给 configure_relay.sh。
 ```
 
 ## 支持的协议类型
@@ -107,12 +139,14 @@
 
 - 对 `openai-responses` / `openai-completions` 做模型存在性探测
 - 返回明确退出码供 skill 判断
+- 不负责推导 `contextWindow` / `maxTokens`
 
 ### `scripts/configure_relay.sh`
 
 负责：
 
 - 用明确参数写入或更新配置
+- 只消费 skill 层已经确定好的 `contextWindow` / `maxTokens`
 - 可选写入 `~/.openclaw/.env`
 - 校验配置并重启 gateway
 

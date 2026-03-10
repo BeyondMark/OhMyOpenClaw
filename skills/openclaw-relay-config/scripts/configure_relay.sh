@@ -12,12 +12,12 @@ Required:
   --base-url URL                Relay endpoint base URL, for example https://example.com/v1
   --api API                     openai-responses | openai-completions | anthropic-messages | google-generative-ai
   --model-id ID                 Model id exposed by the relay
+  --context-window N            models[].contextWindow
+  --max-tokens N                models[].maxTokens
 
 Optional:
   --model-name NAME             Display name stored in models[].name (default: same as model-id)
   --api-key-value VALUE         Write or update the secret in ~/.openclaw/.env
-  --context-window N            models[].contextWindow (default: 128000)
-  --max-tokens N                models[].maxTokens (default: 16384)
   --reasoning true|false        models[].reasoning (default: false)
   --auth-header true|false      Include authHeader in provider config (default: false)
   --header KEY=VALUE            Extra static header, may be repeated
@@ -33,6 +33,8 @@ Example:
     --api openai-responses \
     --model-id gpt-5.4 \
     --model-name "GPT-5.4" \
+    --context-window 1050000 \
+    --max-tokens 128000 \
     --api-key-value "sk-xxxx"
 EOF
 }
@@ -116,8 +118,8 @@ base_url=""
 api=""
 model_id=""
 model_name=""
-context_window="128000"
-max_tokens="16384"
+context_window=""
+max_tokens=""
 reasoning="false"
 auth_header="false"
 set_default="true"
@@ -198,7 +200,7 @@ need_cmd openclaw
 need_cmd python3
 need_cmd mktemp
 
-for required in provider_id api_key_env base_url api model_id; do
+for required in provider_id api_key_env base_url api model_id context_window max_tokens; do
   if [[ -z "${!required}" ]]; then
     echo "Missing required argument: ${required}" >&2
     usage >&2
@@ -232,12 +234,13 @@ fi
 require_bool --reasoning "${reasoning}"
 require_bool --auth-header "${auth_header}"
 require_bool --set-default "${set_default}"
-require_integer --context-window "${context_window}"
-require_integer --max-tokens "${max_tokens}"
 
 if [[ -z "${model_name}" ]]; then
   model_name="${model_id}"
 fi
+
+require_integer --context-window "${context_window}"
+require_integer --max-tokens "${max_tokens}"
 
 if [[ -n "${api_key_value}" && "${api_key_value}" == *$'\n'* ]]; then
   echo "--api-key-value must be a single line" >&2
