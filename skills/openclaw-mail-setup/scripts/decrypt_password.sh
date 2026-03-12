@@ -49,6 +49,16 @@ if [[ -z "${OPENCLAW_SECRET_KEY:-}" ]]; then
   exit 2
 fi
 
+# Check accounts file exists
+if [[ ! -f "$ACCOUNTS_FILE" ]]; then
+  if $JSON_OUTPUT; then
+    echo "{\"success\": false, \"error\": \"Account table not found: $ACCOUNTS_FILE\"}"
+  else
+    echo "Error: Account table not found: $ACCOUNTS_FILE" >&2
+  fi
+  exit 3
+fi
+
 # Read encrypted password from account table
 encrypted=$(jq -r --arg id "$ACCOUNT_ID" '.accounts[$id].passwordEncrypted // empty' "$ACCOUNTS_FILE")
 

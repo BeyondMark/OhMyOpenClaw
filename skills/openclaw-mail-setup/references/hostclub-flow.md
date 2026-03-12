@@ -15,12 +15,12 @@ This document describes the exact browser navigation path for creating an email 
 
 ## Login Flow
 
-### Step 1: Open Hostclub
+### Step 1: Open Hostclub Login Page
 
-Navigate to `https://www.hostclub.org/`.
+Navigate to `https://www.hostclub.org/login.php`（直接打开登录页，而非首页。首页未登录时只显示 `登录/注册` 链接，没有登录表单，会导致登录态检测失准）。
 
 ```bash
-openclaw browser navigate "https://www.hostclub.org/" --browser-profile <profile>
+openclaw browser navigate "https://www.hostclub.org/login.php" --browser-profile <profile>
 ```
 
 ### Step 2: Detect Login State
@@ -31,8 +31,8 @@ Take a snapshot and check the page content:
 openclaw browser snapshot --browser-profile <profile> --labels --efficient
 ```
 
-- **Logged in**: page contains text matching pattern `欢迎 ` (e.g., `欢迎 Yuan Jian !`)。注意 `!` 前有空格。
-- **Not logged in**: page shows a login form, or URL contains `login`.
+- **Logged in**: page contains text matching pattern `欢迎 ` (e.g., `欢迎 Yuan Jian !`)。注意 `!` 前有空格。已登录用户即使打开 login.php 也会看到 `欢迎` 文本。
+- **Not logged in**: page shows a login form（fields `txtUserName` / `txtPassword` visible）。
 
 ### Step 3: Login (if needed)
 
@@ -45,10 +45,11 @@ openclaw browser snapshot --browser-profile <profile> --labels --efficient
 **推荐方式**: 使用 `openclaw browser fill` 通过字段 name 精确填写，或使用 `evaluate --fn` 方式：
 
 ```bash
-# 方式 1: 使用 evaluate 精确定位字段
+# 方式 1: 使用 evaluate 精确定位字段并提交
 openclaw browser evaluate --fn "document.querySelector('input[name=txtUserName]').value = 'user@example.com'" --browser-profile <profile>
 openclaw browser evaluate --fn "document.querySelector('input[name=txtPassword]').value = 'password123'" --browser-profile <profile>
-openclaw browser evaluate --fn "document.querySelector('input[name=txtUserName]').form.submit()" --browser-profile <profile>
+# 提交表单 — 不要用 form.submit()，因为表单内有 name="submit" 的按钮会覆盖该方法
+openclaw browser evaluate --fn "HTMLFormElement.prototype.submit.call(document.querySelector('input[name=txtUserName]').form)" --browser-profile <profile>
 
 # 方式 2: 使用 fill --fields-file (推荐)
 # 创建 fields JSON 文件: [{"selector": "input[name=txtUserName]", "value": "..."}, {"selector": "input[name=txtPassword]", "value": "..."}]
@@ -223,12 +224,18 @@ Before creating, compare `mailboxName@domain` against the existing mailbox list.
 
 1. Click `新建邮箱帐户` (Create New Email Account) button.
 2. If an upgrade prompt appears instead of a creation form, quota is reached. Return `quota_reached`.
-3. Fill in the creation form:
+3. Before filling the form, generate a mailbox password:
+
+```bash
+./scripts/generate_mailbox_password.sh --json
+```
+
+4. Fill in the creation form:
    - Email prefix: `mailboxName`
-   - Password: generate or use a provided password (implementation-dependent)
+   - Password: use the generated password
    - Any other required fields
-4. Submit the form.
-5. Wait for confirmation.
+5. Submit the form.
+6. Wait for confirmation.
 
 ### Step 13: Verify Creation
 
@@ -236,11 +243,7 @@ After form submission:
 
 1. Check for a success message or confirmation dialog.
 2. Verify the new mailbox appears in the email accounts list.
-3. Take a screenshot for evidence:
-
-```bash
-openclaw browser snapshot --browser-profile <profile> --labels --efficient
-```
+3. Return the generated password in the structured result for the caller to store securely. Do not write it to `domains.json` and do not expose it in logs.
 
 ## Domain Switching (Batch)
 

@@ -96,5 +96,20 @@ for field in "${REQUIRED_FIELDS[@]}"; do
   fi
 done
 
+# Validate domain table structure
+if ! jq -e '.domains' "$DOMAINS_FILE" >/dev/null 2>&1; then
+  output_result "malformed" "domains.json missing required .domains key" "true" "true"
+  exit 3
+fi
+
+domain_count=$(jq '.domains | length' "$DOMAINS_FILE")
+if [[ "$domain_count" -gt 0 ]]; then
+  missing_account_id=$(jq -r '.domains | to_entries[] | select(.value.accountId == null or .value.accountId == "") | .key' "$DOMAINS_FILE")
+  if [[ -n "$missing_account_id" ]]; then
+    output_result "malformed" "Domain(s) missing required field 'accountId': $missing_account_id" "true" "true"
+    exit 3
+  fi
+fi
+
 output_result "valid" "Config files are valid" "true" "true"
 exit 0

@@ -19,10 +19,10 @@ This skill owns the decision-making layer:
 - navigate the Hostclub control panel to the target domain
 - check email status (enabled, trial started, quota) before attempting creation
 - enforce idempotency: never create a mailbox that already exists
-- call execution-only scripts for config validation, password decryption, and status updates
+- call execution-only scripts for config validation, Hostclub password decryption, mailbox password generation, and status updates
 - report structured results with screenshots
 
-The browser automation steps (navigation, clicks, form fills) are performed by the agent directly using OpenClaw browser capabilities. The scripts in `scripts/` handle non-browser tasks: config file validation, AES password decryption, domain status updates, and profile management.
+The browser automation steps (navigation, clicks, form fills) are performed by the agent directly using OpenClaw browser capabilities. The scripts in `scripts/` handle non-browser tasks: config file validation, AES password decryption, mailbox password generation, domain status updates, and profile management.
 
 For the detailed Hostclub/Titan navigation flow, read `references/hostclub-flow.md`.
 For account table and domain table schemas, read `references/config-schema.md`.
@@ -52,6 +52,8 @@ Query mode executes Phase 1–4 only: login, navigate to domain, check Titan Ema
 | `mailboxName` | Email prefix to create | `sales` |
 
 Create mode executes the full Phase 1–6 workflow. The resulting mailbox will be: `mailboxName@domain` (e.g., `sales@visionate.net`).
+
+The mailbox password is not supplied by the caller. The skill generates a strong password immediately before creation, uses it in the Titan form, and returns it once in the structured result.
 
 ### Production Config Mode
 
@@ -85,7 +87,7 @@ In production mode (when account/domain tables exist), only `domain` is needed f
 
    This requires the `OPENCLAW_SECRET_KEY` environment variable. If the variable is missing, stop and report the error.
 
-4. In config mode, read `loginUrl` from the account table. In direct mode, default to `https://www.hostclub.org/`.
+4. In config mode, read `loginUrl` from the account table. In direct mode, default to `https://www.hostclub.org/login.php`.
 
 5. Resolve the browser profile name:
 
@@ -106,12 +108,13 @@ In production mode (when account/domain tables exist), only `domain` is needed f
 
 ### Phase 2: Login
 
-7. Launch the browser profile and navigate to the login URL (from account table `loginUrl`, or `https://www.hostclub.org/` in direct mode).
+7. Launch the browser profile and navigate to the login URL (from account table `loginUrl`, or `https://www.hostclub.org/login.php` in direct mode).
 
 8. Detect login state by checking the page content:
 
    - If the page contains text matching the pattern `欢迎 ` (e.g., `欢迎 Yuan Jian !`，注意 `!` 前有空格), the session is active. Skip to Phase 3.
-   - If the page shows a login form or the URL contains `login`, proceed with authentication.
+   - If the page shows a login form (fields `txtUserName` / `txtPassword` visible), proceed with authentication.
+   - If the page shows neither (e.g., redirected to homepage with only a `登录/注册` link), navigate to `https://www.hostclub.org/login.php` first, then re-check.
    - Do not rely solely on cookies; always check rendered page content.
 
 9. If not logged in:
@@ -168,8 +171,20 @@ In production mode (when account/domain tables exist), only `domain` is needed f
 
 21. If the target mailbox does not exist and quota allows:
 
+    - Generate a mailbox password before opening or submitting the creation form:
+
+      ```bash
+      ./scripts/generate_mailbox_password.sh --json
+      ```
+
+      The generated password must be strong and form-safe:
+      - length: 16+ characters
+      - include uppercase, lowercase, digit, and special character
+      - avoid whitespace
+      - do not log it, print it to commentary, or persist it in `domains.json`
+
     - Click the create new mailbox button (`新建邮箱帐户`).
-    - Fill in the mailbox creation form with `mailboxName` and any required fields.
+    - Fill in the mailbox creation form with `mailboxName`, the generated password, and any required fields.
     - Submit the form.
     - Wait for confirmation that creation succeeded.
 
@@ -177,9 +192,7 @@ In production mode (when account/domain tables exist), only `domain` is needed f
 
 ### Phase 6: Result Reporting
 
-21. Take a screenshot of the final state for evidence.
-
-22. If in config mode, update the domain table:
+21. If in config mode, update the domain table:
 
     ```bash
     ./scripts/update_domain_status.sh \
@@ -191,7 +204,7 @@ In production mode (when account/domain tables exist), only `domain` is needed f
 
     The script also records `mailboxCreatedAt` (ISO 8601 timestamp) for successful creations.
 
-23. Return the structured result (see Output Structure below).
+22. Return the structured result (see Output Structure below).
 
 ## Error Handling
 
@@ -248,13 +261,14 @@ Every execution must return this JSON structure:
   "mode": "create",
   "status": "created",
   "createdMailbox": "sales@visionate.net",
+  "mailboxPassword": "N7!qk2@Lm4#pRs8Z",
   "emailEnabled": true,
   "trialStarted": true,
   "adminPanelAccessible": true,
   "existingMailboxes": ["sales@visionate.net"],
   "mailboxQuotaReached": true,
   "canCreateAnotherMailbox": false,
-  "screenshotPath": "/path/to/screenshot.png",
+
   "error": null
 }
 ```
@@ -267,13 +281,14 @@ Every execution must return this JSON structure:
   "mode": "query",
   "status": "query_ok",
   "createdMailbox": null,
+  "mailboxPassword": null,
   "emailEnabled": true,
   "trialStarted": true,
   "adminPanelAccessible": false,
   "existingMailboxes": [],
   "mailboxQuotaReached": false,
   "canCreateAnotherMailbox": false,
-  "screenshotPath": "/path/to/screenshot.png",
+
   "error": null
 }
 ```
@@ -294,6 +309,7 @@ Every execution must return this JSON structure:
 
 - `emailEnabled`: set to `true` if the domain order page shows a `Titan Email (Global)` section with `Business (Free Trial)` or any active status. `false` if no Titan section or only a `Start Free Trial Now` button.
 - `trialStarted`: `true` if the free trial has been activated (either previously or during this execution). `false` only if the domain has never had Titan Email enabled.
+- `mailboxPassword`: the generated password used for creation. Set it only when a new mailbox was actually created (`status=created` or `status=trial_started`). For `query_ok`, `already_exists`, `quota_reached`, `failed`, and `needs_human`, set it to `null`.
 - `adminPanelAccessible`: `true` if the skill successfully navigated to `mailhostbox.titan.email`. `false` if the panel was unreachable (SSO failure, timeout, etc.). In query mode, this is always `false` because the skill does not navigate to the Titan panel.
 - `mailboxQuotaReached`: `true` if `TOTAL EMAIL ACCOUNTS` shows the maximum (e.g., `1/1`). `false` otherwise. In query mode, this is inferred from the domain order page text if visible.
 - `canCreateAnotherMailbox`: `true` only when all three conditions are met: `emailEnabled=true`, `adminPanelAccessible=true`, and `mailboxQuotaReached=false`. If any condition fails, this is `false` — even when quota is not reached, an unreachable admin panel means creation is impossible. In query mode, since `adminPanelAccessible` is always `false`, this field is always `false` — the caller should rely on `emailEnabled` and `mailboxQuotaReached` to infer availability.
@@ -342,8 +358,8 @@ Before each domain, re-check login state. If the session expired (no `欢迎` te
   "succeeded": 2,
   "failed": 1,
   "results": [
-    { "domain": "visionate.net", "mailboxName": "sales", "success": true, "status": "created" },
-    { "domain": "abc.com", "mailboxName": "contact", "success": true, "status": "already_exists" },
+    { "domain": "visionate.net", "mailboxName": "sales", "success": true, "status": "created", "mailboxPassword": "N7!qk2@Lm4#pRs8Z" },
+    { "domain": "abc.com", "mailboxName": "contact", "success": true, "status": "already_exists", "mailboxPassword": null },
     { "domain": "xyz.org", "mailboxName": "info", "success": false, "status": "needs_human", "error": "Titan panel unreachable after 3 retries" }
   ]
 }
@@ -368,10 +384,9 @@ Production environments should implement a profile-level lock to enforce serial 
 ## Safety Rules
 
 - **Password encryption**: passwords are stored as AES-256-CBC encrypted Base64 strings in the `passwordEncrypted` field. The encryption key comes from the `OPENCLAW_SECRET_KEY` environment variable — it must never appear in config files, code, or logs.
-- **Password handling**: decrypted passwords must be used immediately and discarded. Never cache, log, or include them in screenshots.
+- **Password handling**: decrypted Hostclub passwords must be used immediately and discarded. Generated mailbox passwords must be returned once in structured output, then treated as caller-managed secrets. Never cache them in local files, log them, or include them in screenshots.
 - **Profile data isolation**: browser profile data directories must be readable only by the OpenClaw runtime user (`chmod 700`). Other users must not have read access.
 - Do not silently overwrite existing browser profiles.
-- Always take a screenshot before returning results, for audit trail.
 - Do not attempt to create a mailbox if quota is reached — check first.
 - If login state detection is ambiguous, re-authenticate rather than proceeding with a potentially invalid session.
 
@@ -394,6 +409,7 @@ Examples: `hostclub-001`, `hostclub-002`, `namesilo-001`
 
 - `scripts/check_config.sh`: validate account table and domain table exist and are well-formed
 - `scripts/decrypt_password.sh`: decrypt AES-256-CBC encrypted password using `OPENCLAW_SECRET_KEY`
+- `scripts/generate_mailbox_password.sh`: generate a strong mailbox password for newly created Titan accounts
 - `scripts/manage_profile.sh`: check, create, or list OpenClaw browser profiles
 - `scripts/update_domain_status.sh`: update domain table after mailbox creation with result status
 

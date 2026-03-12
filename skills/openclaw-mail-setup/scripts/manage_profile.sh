@@ -69,8 +69,8 @@ fi
 case "$ACTION" in
   check)
     validate_name "$PROFILE_NAME"
-    # Check if profile exists by listing profiles and searching
-    if openclaw browser profiles 2>/dev/null | grep -q "^${PROFILE_NAME}$"; then
+    # Check if profile exists — output format is "name: status (info)" or just "name"
+    if openclaw browser profiles 2>/dev/null | grep -q "^${PROFILE_NAME}\(:\|$\)"; then
       if $JSON_OUTPUT; then
         echo "{\"success\": true, \"exists\": true, \"profileName\": \"$PROFILE_NAME\"}"
       else
@@ -89,27 +89,31 @@ case "$ACTION" in
 
   create)
     validate_name "$PROFILE_NAME"
-    if openclaw browser create-profile --name "$PROFILE_NAME" 2>&1; then
-      if $JSON_OUTPUT; then
+    if $JSON_OUTPUT; then
+      # Suppress CLI output in JSON mode to keep stdout pure JSON
+      if cli_output=$(openclaw browser create-profile --name "$PROFILE_NAME" 2>&1); then
         echo "{\"success\": true, \"created\": true, \"profileName\": \"$PROFILE_NAME\"}"
+        exit 0
       else
-        echo "Profile '$PROFILE_NAME' created."
-      fi
-      exit 0
-    else
-      if $JSON_OUTPUT; then
         echo "{\"success\": false, \"error\": \"Failed to create profile '$PROFILE_NAME'\"}"
+        exit 3
+      fi
+    else
+      if openclaw browser create-profile --name "$PROFILE_NAME" 2>&1; then
+        echo "Profile '$PROFILE_NAME' created."
+        exit 0
       else
         echo "Error: Failed to create profile '$PROFILE_NAME'" >&2
+        exit 3
       fi
-      exit 3
     fi
     ;;
 
   list)
     profiles=$(openclaw browser profiles 2>/dev/null || true)
     if $JSON_OUTPUT; then
-      echo "$profiles" | jq -R -s 'split("\n") | map(select(. != "")) | {success: true, profiles: .}'
+      # Extract profile names only — output lines are "name: status (info)" or just "name"
+      echo "$profiles" | sed -n 's/^\([a-z0-9][a-z0-9-]*\).*/\1/p' | jq -R -s 'split("\n") | map(select(. != "")) | {success: true, profiles: .}'
     else
       echo "$profiles"
     fi

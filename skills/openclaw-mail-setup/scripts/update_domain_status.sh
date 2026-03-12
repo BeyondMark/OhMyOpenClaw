@@ -5,7 +5,7 @@
 #   ./scripts/update_domain_status.sh \
 #     --domain <domain> \
 #     --mailbox <email> \
-#     --status <created|already_exists|quota_reached|failed|needs_human> \
+#     --status <created|trial_started|already_exists|quota_reached|failed|needs_human> \
 #     [--json]
 #
 # Updates the domain entry in ~/.openclaw/mail/domains.json with:
@@ -73,9 +73,19 @@ NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Determine mailbox and timestamp values based on status
 case "$STATUS" in
-  created|trial_started|already_exists)
+  created|trial_started)
     MAILBOX_VALUE="\"$MAILBOX\""
     CREATED_AT="\"$NOW\""
+    ;;
+  already_exists)
+    # Mailbox exists but was not created now — preserve original mailboxCreatedAt
+    MAILBOX_VALUE="\"$MAILBOX\""
+    EXISTING_CREATED_AT=$(jq -r --arg d "$DOMAIN" '.domains[$d].mailboxCreatedAt // empty' "$DOMAINS_FILE")
+    if [[ -n "$EXISTING_CREATED_AT" ]]; then
+      CREATED_AT="\"$EXISTING_CREATED_AT\""
+    else
+      CREATED_AT="null"
+    fi
     ;;
   *)
     MAILBOX_VALUE="null"

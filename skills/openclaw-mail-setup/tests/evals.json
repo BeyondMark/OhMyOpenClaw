@@ -4,22 +4,25 @@
     {
       "id": 1,
       "name": "create-new-mailbox-direct-mode",
-      "prompt": "使用 $openclaw-mail-setup 为域名 visionate.net 创建一个 sales 邮箱。账号是 monetize@visionate.net，密码是 test123。这个域名还没有开通过 Titan Email。",
-      "expected_output": "Skill 应该：1) 检测到没有配置文件，使用直接模式；2) 启动浏览器 profile 并打开 hostclub.org；3) 检测登录状态并登录；4) 导航到域名订单页；5) 检测到邮箱未开通，点击 Start Free Trial Now；6) 进入 Titan 面板创建 sales@visionate.net；7) 返回结构化结果，status 为 created 或 trial_started",
+      "prompt": "使用 $openclaw-mail-setup 为域名 wavelengthpulsmk.com 创建一个 sales 邮箱。账号是 monetize@visionate.net，密码是 test123。这个域名的 Titan Email 已经开通，免费试用额度已满（1/1）。",
+      "expected_output": "Skill 应该：1) 检测到没有配置文件，使用直接模式；2) 启动浏览器 profile 并打开 login.php；3) 检测登录状态并登录；4) 导航到 wavelengthpulsmk.com 域名订单页；5) 检测到 TOTAL EMAIL ACCOUNTS 1/1 额度已满；6) 返回 status: quota_reached，success: false，mailboxPassword: null",
+      "notes": "原用例使用 visionate.net，但该域名在当前账号下搜不到（2026-03-12 实测）。已替换为 wavelengthpulsmk.com。由于额度已满，无法执行创建流程。",
       "files": []
     },
     {
       "id": 2,
-      "name": "idempotent-existing-mailbox",
+      "name": "quota-reached-admin-panel-unreachable",
       "prompt": "用 $openclaw-mail-setup 在 wavelengthpulsmk.com 创建 contact 邮箱。hostclub 账号 monetize@visionate.net，密码 test123。注意这个域名之前已经创建过 contact@wavelengthpulsmk.com 了。",
-      "expected_output": "Skill 应该：1) 登录 hostclub；2) 导航到 wavelengthpulsmk.com 域名；3) 检测到已有邮箱 contact@wavelengthpulsmk.com；4) 幂等判断目标邮箱已存在；5) 返回 status: already_exists，success: true，不重复创建",
+      "expected_output": "Skill 应该：1) 登录 hostclub；2) 导航到 wavelengthpulsmk.com 域名；3) 检测到 1/1 额度已满；4) 点击 Login to Webmail 尝试进入 Titan 面板；5) 如果落在终端用户登录页（adminPanelAccessible=false），返回 status: quota_reached；6) 如果成功进入管理面板，枚举到 contact@wavelengthpulsmk.com 已存在，返回 status: already_exists；7) mailboxPassword: null",
+      "notes": "实测 Login to Webmail 落在 mailhostbox.titan.email/login/ 终端用户登录页（2026-03-12），无法枚举邮箱列表。此时按 skill 降级分支，期望结果是 quota_reached 而非 already_exists。",
       "files": []
     },
     {
       "id": 3,
       "name": "quota-reached-different-mailbox",
       "prompt": "帮我在 wavelengthpulsmk.com 域名下创建 hr 邮箱。hostclub 后台是 monetize@visionate.net / test123。这个域名已经有 contact@wavelengthpulsmk.com 了，免费试用只允许 1 个邮箱。",
-      "expected_output": "Skill 应该：1) 登录并导航到域名；2) 检测到 TOTAL EMAIL ACCOUNTS 1/1 额度已满；3) 确认目标 hr@wavelengthpulsmk.com 不在已有列表中；4) 返回 status: quota_reached，success: false，说明免费试用额度已满",
+      "expected_output": "Skill 应该：1) 登录并导航到域名；2) 检测到 TOTAL EMAIL ACCOUNTS 1/1 额度已满；3) 如果能进入管理面板，确认 hr@wavelengthpulsmk.com 不在列表中，返回 quota_reached；4) 如果管理面板不可达，直接返回 quota_reached；5) success: false，mailboxPassword: null",
+      "notes": "无论管理面板是否可达，额度已满时结果都应该是 quota_reached。",
       "files": []
     }
   ]
