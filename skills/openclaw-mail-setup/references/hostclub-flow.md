@@ -57,6 +57,8 @@ openclaw browser fill --fields-file /tmp/login-fields.json --browser-profile <pr
 
 **不要**直接使用 `openclaw browser type <ref>` 来填写登录表单，因为 snapshot 中 text 和 password 类型的 ref 可能匹配到注册表单的同类型输入框。
 
+**不要**通过匹配"登录"文字来寻找提交按钮。页面顶部有 `登录/注册` 导航链接，模糊匹配会点到导航而非表单提交按钮。提交表单应使用 `HTMLFormElement.prototype.submit.call(form)` 或精确定位表单内的 `input[type=submit]`。
+
 登录后等待页面刷新，验证 `欢迎` 文本出现：
 
 ```bash
@@ -178,13 +180,29 @@ openclaw browser click <login-to-webmail-ref> --browser-profile <profile>
 
 点击 `Login to Webmail` 后，浏览器跳转到 `mailhostbox.titan.email`（不是 `manage.titan.email`）。
 
-等待 email accounts 列表加载：
+**重要**: `Login to Webmail` 不一定直接进入管理员邮箱列表页。实测中存在两种结果：
+
+- **情况 A — 直接进入管理面板**: URL 类似 `mailhostbox.titan.email/mail/...` 或直接显示 email accounts 列表。此时可以正常读取已有邮箱和执行创建操作。
+- **情况 B — 落在终端用户登录页**: URL 为 `mailhostbox.titan.email/login/` 或类似登录页面。此时无法枚举已有邮箱地址。
 
 ```bash
 openclaw browser snapshot --browser-profile <profile> --labels --efficient
+# 检查 URL 和页面内容：
+# - 如果看到邮箱列表 → 情况 A，继续 Step 10
+# - 如果看到登录表单 → 情况 B，见下方降级处理
 ```
 
+**情况 B 降级处理**:
+
+当落在 Titan 登录页时，skill 无法获取具体的邮箱地址列表。处理策略：
+1. 将 `adminPanelAccessible` 设为 `false`
+2. 依据 Phase 4 从域名详情页获取的配额信息（如 `TOTAL EMAIL ACCOUNTS 1/1`）判断状态
+3. 如果配额已满（`1/1`），返回 `quota_reached`（已知有 1 个邮箱但无法确认具体地址）
+4. 如果配额未满，仍可尝试创建（Step 12），但无法做精确的幂等性检查
+
 ### Step 10: Read Existing Mailboxes
+
+> 此步骤仅在情况 A（成功进入管理面板）时执行。
 
 On the email accounts page, read the list of existing mailbox accounts. Note:
 

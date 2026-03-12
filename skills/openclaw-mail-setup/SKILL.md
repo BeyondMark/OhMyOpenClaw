@@ -30,7 +30,19 @@ For OpenClaw browser CLI commands and ref 歧义处理, read `references/browser
 
 ## Required Inputs
 
-Minimum viable inputs (4 fields):
+The skill supports two operation modes based on whether `mailboxName` is provided:
+
+### Query Mode (3 fields — check email status only)
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `username` | Hostclub backend login account | `monetize@visionate.net` |
+| `password` | Hostclub backend login password | `***` |
+| `domain` | Target domain name | `visionate.net` |
+
+Query mode executes Phase 1–4 only: login, navigate to domain, check Titan Email status (enabled/trial/quota), list existing mailboxes, then return the result. No mailbox is created.
+
+### Create Mode (4 fields — create a mailbox)
 
 | Field | Description | Example |
 |-------|-------------|---------|
@@ -39,20 +51,26 @@ Minimum viable inputs (4 fields):
 | `domain` | Target domain name | `visionate.net` |
 | `mailboxName` | Email prefix to create | `sales` |
 
-The resulting mailbox will be: `mailboxName@domain` (e.g., `sales@visionate.net`).
+Create mode executes the full Phase 1–6 workflow. The resulting mailbox will be: `mailboxName@domain` (e.g., `sales@visionate.net`).
 
-In production mode (when account/domain tables exist), only `domain` and `mailboxName` are needed. The skill resolves account credentials and browser profile from the config files. The account table also provides `provider` (platform identifier for multi-platform routing) and `loginUrl` (so the login address is not hardcoded).
+### Production Config Mode
+
+In production mode (when account/domain tables exist), only `domain` is needed for query, or `domain` and `mailboxName` for create. The skill resolves account credentials and browser profile from the config files. The account table also provides `provider` (platform identifier for multi-platform routing) and `loginUrl` (so the login address is not hardcoded).
 
 ## Workflow
 
 ### Phase 1: Pre-flight Checks
 
-1. Validate inputs: all 4 fields must be non-empty, `domain` must look like a valid domain, `mailboxName` must be a valid email local part.
+1. Validate inputs:
 
-2. Determine operating mode:
+   - `username`, `password`, `domain` must be non-empty. `domain` must look like a valid domain.
+   - If `mailboxName` is provided, it must be a valid email local part. The skill runs in **create mode**.
+   - If `mailboxName` is absent or empty, the skill runs in **query mode** (status check only, no creation).
+
+2. Determine credential mode:
 
    - **Config mode** (account/domain tables exist): run the config check script, resolve account from domain mapping, decrypt password.
-   - **Direct mode** (no config tables): use the 4 raw inputs directly.
+   - **Direct mode** (no config tables): use the raw inputs directly.
 
    ```bash
    # Check if config files exist and are valid
@@ -100,6 +118,7 @@ In production mode (when account/domain tables exist), only `domain` and `mailbo
 
    - **注意**: 登录页面同时包含登录表单和注册表单，两者都有 text/password 输入框。直接使用 snapshot ref 可能匹配到错误的表单。
    - 使用 `openclaw browser evaluate --fn` 或 `openclaw browser fill --fields-file` 方式，通过字段 name 属性（`txtUserName`, `txtPassword`）精确定位登录表单字段。详见 `references/browser-commands.md` 的 "处理 Ref 歧义" 章节。
+   - **不要**通过匹配"登录"文字来寻找提交按钮——页面顶部有 `登录/注册` 导航链接，匹配文字会点到导航而非表单提交。应直接提交登录表单本身（`HTMLFormElement.prototype.submit.call(form)`）或精确定位表单内的提交按钮。
    - Submit the login form.
    - Wait for the page to load and verify login succeeded (look for `欢迎` text).
    - If login fails due to wrong credentials, stop immediately and return a `failed` result.
@@ -126,26 +145,35 @@ In production mode (when account/domain tables exist), only `domain` and `mailbo
     - **Enabled (trial active)**: `Business (Free Trial)` label is visible, along with `TOTAL EMAIL ACCOUNTS X/Y`.
     - **Quota reached**: `TOTAL EMAIL ACCOUNTS` shows `1/1` (or max reached).
 
-16. Based on status:
+16. **Query mode**: if `mailboxName` is not provided, collect the status information from this page (emailEnabled, trialStarted, quota) and skip to Phase 6 to return the result with status `query_ok`. Do not click any buttons or navigate further. If the Titan section shows existing mailbox info, include it in `existingMailboxes`.
+
+17. **Create mode**: based on status:
 
     - If not enabled: click `Start Free Trial Now`, wait for activation, then proceed to the Titan admin panel. When creation succeeds in this path, use status `trial_started` (not `created`) to distinguish first-time activation from subsequent creations.
     - If enabled and quota not reached: click `Login to Webmail` 链接进入 Titan 管理面板（`mailhostbox.titan.email`）。**注意**: `Go to Admin Panel` 是纯文本标签，不可点击/不可交互，不要尝试点击它。
     - If quota reached: still click `Login to Webmail` to enter the Titan panel and check the existing mailbox list. If `mailboxName@domain` is already in the list, return `already_exists`. If the target mailbox is not in the list, return `quota_reached`.
 
-### Phase 5: Idempotency Check and Mailbox Creation
+### Phase 5: Idempotency Check and Mailbox Creation (Create Mode Only)
 
-17. In the Titan admin panel (`mailhostbox.titan.email`), check the existing mailbox list.
+> This phase is skipped entirely in query mode.
 
-18. **Idempotency**: if `mailboxName@domain` already appears in the list, do not create it again. Return `already_exists` with `success: true`.
+18. Verify Titan panel access. `Login to Webmail` 不一定直接进入管理面板，可能落在 `mailhostbox.titan.email/login/` 终端用户登录页。详见 `references/hostclub-flow.md` Step 9。
 
-19. If the target mailbox does not exist and quota allows:
+    - **管理面板可达**: URL 显示邮箱列表页面 → 设 `adminPanelAccessible=true`，继续步骤 19。
+    - **管理面板不可达（登录页）**: 设 `adminPanelAccessible=false`。此时无法枚举已有邮箱，依据 Phase 4 获取的配额判断：配额已满返回 `quota_reached`，配额未满可尝试创建但无法做精确幂等性检查。
+
+19. In the Titan admin panel, check the existing mailbox list (仅当 `adminPanelAccessible=true`).
+
+20. **Idempotency**: if `mailboxName@domain` already appears in the list, do not create it again. Return `already_exists` with `success: true`.
+
+21. If the target mailbox does not exist and quota allows:
 
     - Click the create new mailbox button (`新建邮箱帐户`).
     - Fill in the mailbox creation form with `mailboxName` and any required fields.
     - Submit the form.
     - Wait for confirmation that creation succeeded.
 
-20. If the creation form shows an upgrade prompt instead of a usable form, the quota is actually reached. Return `quota_reached`.
+22. If the creation form shows an upgrade prompt instead of a usable form, the quota is actually reached. Return `quota_reached`.
 
 ### Phase 6: Result Reporting
 
@@ -212,9 +240,12 @@ The skill itself handles one domain per invocation. The caller is responsible fo
 
 Every execution must return this JSON structure:
 
+**Create mode example:**
+
 ```json
 {
   "success": true,
+  "mode": "create",
   "status": "created",
   "createdMailbox": "sales@visionate.net",
   "emailEnabled": true,
@@ -228,25 +259,45 @@ Every execution must return this JSON structure:
 }
 ```
 
+**Query mode example:**
+
+```json
+{
+  "success": true,
+  "mode": "query",
+  "status": "query_ok",
+  "createdMailbox": null,
+  "emailEnabled": true,
+  "trialStarted": true,
+  "adminPanelAccessible": false,
+  "existingMailboxes": [],
+  "mailboxQuotaReached": false,
+  "canCreateAnotherMailbox": false,
+  "screenshotPath": "/path/to/screenshot.png",
+  "error": null
+}
+```
+
 `status` values:
 
-| Status | Meaning |
-|--------|---------|
-| `created` | Mailbox created successfully |
-| `already_exists` | Target mailbox already exists, no action taken |
-| `quota_reached` | Free trial quota full, cannot create |
-| `trial_started` | Free trial activated and mailbox created |
-| `failed` | Creation failed (see `error` field) |
-| `needs_human` | Requires manual intervention (e.g., CAPTCHA) |
+| Status | Meaning | Mode |
+|--------|---------|------|
+| `query_ok` | Status check completed, no action taken | Query |
+| `created` | Mailbox created successfully | Create |
+| `already_exists` | Target mailbox already exists, no action taken | Create |
+| `quota_reached` | Free trial quota full, cannot create | Create |
+| `trial_started` | Free trial activated and mailbox created | Create |
+| `failed` | Operation failed (see `error` field) | Both |
+| `needs_human` | Requires manual intervention (e.g., CAPTCHA) | Both |
 
 ### Output Field Calculation Rules
 
 - `emailEnabled`: set to `true` if the domain order page shows a `Titan Email (Global)` section with `Business (Free Trial)` or any active status. `false` if no Titan section or only a `Start Free Trial Now` button.
 - `trialStarted`: `true` if the free trial has been activated (either previously or during this execution). `false` only if the domain has never had Titan Email enabled.
-- `adminPanelAccessible`: `true` if the skill successfully navigated to `mailhostbox.titan.email`. `false` if the panel was unreachable (SSO failure, timeout, etc.).
-- `mailboxQuotaReached`: `true` if `TOTAL EMAIL ACCOUNTS` shows the maximum (e.g., `1/1`). `false` otherwise.
-- `canCreateAnotherMailbox`: `true` only when all three conditions are met: `emailEnabled=true`, `adminPanelAccessible=true`, and `mailboxQuotaReached=false`. If any condition fails, this is `false` — even when quota is not reached, an unreachable admin panel means creation is impossible.
-- `status` distinction: use `trial_started` when the free trial was activated during this execution (Phase 4 step 16, "not enabled" branch). Use `created` when the trial was already active and the mailbox was created normally.
+- `adminPanelAccessible`: `true` if the skill successfully navigated to `mailhostbox.titan.email`. `false` if the panel was unreachable (SSO failure, timeout, etc.). In query mode, this is always `false` because the skill does not navigate to the Titan panel.
+- `mailboxQuotaReached`: `true` if `TOTAL EMAIL ACCOUNTS` shows the maximum (e.g., `1/1`). `false` otherwise. In query mode, this is inferred from the domain order page text if visible.
+- `canCreateAnotherMailbox`: `true` only when all three conditions are met: `emailEnabled=true`, `adminPanelAccessible=true`, and `mailboxQuotaReached=false`. If any condition fails, this is `false` — even when quota is not reached, an unreachable admin panel means creation is impossible. In query mode, since `adminPanelAccessible` is always `false`, this field is always `false` — the caller should rely on `emailEnabled` and `mailboxQuotaReached` to infer availability.
+- `status` distinction: use `query_ok` in query mode. Use `trial_started` when the free trial was activated during this execution (Phase 4 step 17, "not enabled" branch). Use `created` when the trial was already active and the mailbox was created normally.
 
 ## Batch Dispatching (Caller's Responsibility)
 

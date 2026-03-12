@@ -91,6 +91,37 @@ openclaw browser evaluate --fn "document.querySelector('input[name=txtUserName]'
 - snapshot ref 匹配多个元素（歧义）
 - 需要执行复杂的 DOM 操作
 
+### evaluate 最佳实践
+
+**先最小脚本验证，再扩展**。不要一次性写长脚本，先用最简单的表达式确认选择器能命中目标元素，再逐步添加操作。
+
+常见坑：
+
+```bash
+# ❌ form.submit is not a function
+# 如果表单内有 name="submit" 的元素，form.submit 会被覆盖为该元素的引用
+openclaw browser evaluate --fn "document.querySelector('input[name=txtUserName]').form.submit()" --browser-profile <profile>
+
+# ✅ 使用 HTMLFormElement.prototype.submit.call() 绕过
+openclaw browser evaluate --fn "HTMLFormElement.prototype.submit.call(document.querySelector('input[name=txtUserName]').form)" --browser-profile <profile>
+
+# ✅ 或者找到表单提交按钮直接 click
+openclaw browser evaluate --fn "document.querySelector('form input[type=submit]').click()" --browser-profile <profile>
+```
+
+```bash
+# ❌ 语法错误: 引号嵌套、括号不匹配
+openclaw browser evaluate --fn "document.querySelector('a[href="javascript:void(0)"]').click()" --browser-profile <profile>
+
+# ✅ 内层用转义引号或不同引号类型
+openclaw browser evaluate --fn "document.querySelector('a[href=\"javascript:void(0)\"]').click()" --browser-profile <profile>
+```
+
+**验证流程**:
+1. 先运行选择器确认能选中元素: `document.querySelector('...')` — 应返回非 null
+2. 确认元素属性: `document.querySelector('...').tagName` / `.textContent`
+3. 最后执行操作: `.click()` / `.value = '...'` / `form.submit()`
+
 ## 标签页管理
 
 ### tabs — 列出所有标签页
@@ -98,6 +129,16 @@ openclaw browser evaluate --fn "document.querySelector('input[name=txtUserName]'
 ```bash
 openclaw browser tabs --browser-profile <profile>
 ```
+
+### focus — 切换到指定标签页
+
+```bash
+openclaw browser focus <targetId> --browser-profile <profile>
+```
+
+`targetId` 从 `tabs` 命令的输出中获取。
+
+**注意**: 不存在 `select-tab` 命令，切换标签页必须使用 `focus`。
 
 ### close — 关闭标签页
 
@@ -137,4 +178,14 @@ openclaw browser type "T3" "username" --browser-profile hostclub-001
 
 # ✅ 正确: 通过 name 属性精确定位
 openclaw browser evaluate --fn "document.querySelector('input[name=txtUserName]').value = 'username'" --browser-profile hostclub-001
+```
+
+示例 — 登录按钮误点:
+
+```bash
+# ❌ 错误: 匹配文字含"登录"的元素会点到页面顶部的 登录/注册 导航链接
+openclaw browser click <含"登录"文字的ref> --browser-profile hostclub-001
+
+# ✅ 正确: 提交登录表单本身，或精确定位表单内的提交按钮
+openclaw browser evaluate --fn "HTMLFormElement.prototype.submit.call(document.querySelector('input[name=txtUserName]').form)" --browser-profile hostclub-001
 ```
