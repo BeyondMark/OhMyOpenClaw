@@ -1,4 +1,4 @@
 interface:
   display_name: "OpenClaw Gateway 修复"
-  short_description: "修复升级后 OpenClaw Gateway 重启循环与配置阻塞"
-  default_prompt: "使用 $openclaw-gateway-repair 排查并修复 OpenClaw 升级后 gateway 无限重启或 gateway.mode 未配置的问题。"
+  short_description: "仅在用户显式要求时启动，修复升级后 OpenClaw Gateway 重启循环与配置阻塞"
+  default_prompt: "这个 skill 只能在用户显式点名 $openclaw-gateway-repair，或显式要求排查修复 OpenClaw gateway 无限重启、启动被阻塞、gateway.mode 未配置时启动。启动后再按既定流程检查日志、确认根因并执行修复脚本。"

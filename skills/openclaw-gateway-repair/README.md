@@ -2,6 +2,14 @@
 
 这个目录提供一个可执行 Skill，用于排查并修复 OpenClaw 升级后 gateway 无限重启、启动被阻塞，或 `gateway.mode` 缺失的问题。
 
+## 触发限制
+
+- 这个 skill 是“仅手动触发 / 仅显式调用”
+- 只有在用户明确要求排查或修复 gateway 重启、阻塞启动、`gateway.mode` 缺失问题时才允许启动
+- 不能因为用户只是说 OpenClaw 有点异常、启动慢、模型不可用，就自动触发这个 skill
+
+如果 gateway 本身正常，但你新加的 relay 模型在 OpenClaw `/model` 里不可选，这不是这个 skill 的职责范围。那类问题通常是 `agents.defaults.models` 没有同步注册，应改用 `openclaw-relay-provider-config`。
+
 ## 背景
 
 - 核对场景来自 `2026-03-09`

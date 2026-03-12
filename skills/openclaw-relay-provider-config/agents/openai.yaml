@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenClaw Relay Provider 配置"
+  short_description: "仅在用户显式要求时启动，按向导式流程执行 OpenClaw relay provider 配置或删除，并同步注册 agents.defaults.models"
+  default_prompt: "这个 skill 只能在用户显式点名 $openclaw-relay-provider-config，或显式要求配置、更新、删除 OpenClaw relay provider 时启动。启动后，先按固定向导流程判断是新增、更新还是删除，再只收集缺失参数，推导 providerId 和 API key 变量名，检查重名与模型可用性，执行前先回显最终写入内容并等待确认，随后直接执行 OpenClaw relay 的配置或删除命令，并通过 scripts/models_catalog_helper.mjs 同步维护 agents.defaults.models，让新模型能在 /model 中可选。"

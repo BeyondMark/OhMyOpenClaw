@@ -92,6 +92,7 @@ Recommended: `acct_{provider}_{sequence}` (e.g., `acct_hostclub_001`).
 
 - During free trial, each domain supports only 1 mailbox, so `mailbox` is a single value, not an array.
 - After successful creation, `update_domain_status.sh` writes back `mailbox`, `mailboxCreatedAt`, `lastStatus`, and `lastUpdatedAt`.
+- Generated mailbox passwords are not persisted in `domains.json`. The caller must store the returned password securely if it needs to be reused later.
 - The scheduler can skip domains where `mailbox` is not null and `lastStatus` is `created` or `already_exists`.
 
 ### Example

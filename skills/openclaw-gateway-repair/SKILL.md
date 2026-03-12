@@ -9,6 +9,15 @@ description: "Diagnose and repair OpenClaw gateway restart loops or blocked star
 
 Use this skill to diagnose upgrade-related OpenClaw gateway failures where the service appears installed but repeatedly restarts or is blocked by missing local-mode configuration.
 
+Trigger policy:
+
+- manual-only
+- start this skill only when the user explicitly asks to use `openclaw-gateway-repair`, or explicitly asks to diagnose/repair gateway restart loops, blocked starts, or missing `gateway.mode=local`
+- do not auto-trigger this skill from vague mentions of OpenClaw problems
+- if the user has not explicitly asked for gateway repair work, stop and ask before proceeding with this skill
+
+Do not use this skill for relay/provider model registration. If the gateway is healthy but a custom model is missing from OpenClaw `/model`, the likely cause is a missing `agents.defaults.models` entry; use `openclaw-relay-provider-config` instead.
+
 Follow the workflow in order. Prefer the bundled script for deterministic repair, then verify with `openclaw status` and recent logs.
 
 When referring to bundled files, resolve paths relative to this skill directory. Do not assume a user-specific install path.

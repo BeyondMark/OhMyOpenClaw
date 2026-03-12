@@ -39,6 +39,15 @@ openclaw setup --mode local
 4. 核对 `~/.openclaw/openclaw.json` 中 `gateway.auth.mode`、`gateway.auth.token` 是否完整
 5. 检查是否有端口占用或旧进程残留，再决定是否执行 `openclaw gateway restart`
 
+如果这几项都正常，但某个自定义 relay 模型仍然没有出现在 OpenClaw `/model`，优先检查：
+
+```bash
+openclaw config get agents.defaults.models
+openclaw models list
+```
+
+这通常不是 gateway 启动问题，而是 relay/provider 没有把 `<providerId>/<modelId>` 注册进 OpenClaw 的模型 allowlist。此时应改走 `openclaw-relay-provider-config`。
+
 ## 官方文档
 
 - <https://docs.openclaw.ai/cli/gateway>

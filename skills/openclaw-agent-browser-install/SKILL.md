@@ -9,6 +9,13 @@ description: "Install or verify vercel-labs/agent-browser for Claude Code, Codex
 
 Use this skill to install `vercel-labs/agent-browser` in a controlled way.
 
+Trigger policy:
+
+- manual-only
+- start this skill only when the user explicitly asks to use `openclaw-agent-browser-install`, or explicitly asks to install/verify `agent-browser` for Claude Code, Codex, or OpenClaw
+- do not auto-trigger this skill from generic browser automation or tool-install questions
+- if the user has not explicitly asked for `agent-browser` installation or verification, stop and ask before proceeding with this skill
+
 When referring to bundled files, resolve paths relative to this skill directory. Do not assume a user-specific checkout path.
 
 This skill owns the decision-making layer:

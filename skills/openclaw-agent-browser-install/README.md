@@ -2,6 +2,12 @@
 
 这个目录提供一个可执行 Skill，用于为 `Claude Code`、`Codex` 或 `OpenClaw` 安装并验证 `vercel-labs/agent-browser`。
 
+## 触发限制
+
+- 这个 skill 是“仅手动触发 / 仅显式调用”
+- 只有在用户明确要求安装、配置、验证 `agent-browser`，或者明确点名 `openclaw-agent-browser-install` 时才允许启动
+- 不能因为用户只是提到浏览器自动化、Playwright、技能安装、CLI 安装之类的相近需求就自动触发
+
 ## 目标
 
 - 先检测机器上是否已安装 `Claude Code CLI`、`Codex CLI`、`OpenClaw`
