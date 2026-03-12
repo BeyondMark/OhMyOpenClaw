@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenClaw 权限配置"
+  short_description: "检测版本、审计五大权限层、引导配置并验证 OpenClaw 权限"
+  default_prompt: "使用 $openclaw-permission-config 先检测我的 OpenClaw 版本和当前权限状态；审计 Sandbox、Tool Policy、Elevated、Exec Approvals、Gateway Auth 五个层级；根据我的使用场景推荐配置；应用后验证结果。"

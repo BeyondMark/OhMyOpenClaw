@@ -1,0 +1,74 @@
+[
+  {
+    "query": "我在 hostclub 上有个域名 visionate.net，需要给它创建一个 sales@ 的企业邮箱，后台账号是 monetize@visionate.net",
+    "should_trigger": true
+  },
+  {
+    "query": "帮我检查一下 wavelengthpulsmk.com 这个域名的 Titan Email 状态，看看还能不能再建一个邮箱",
+    "should_trigger": true
+  },
+  {
+    "query": "我有大概30多个域名都在同一个 hostclub 账号下，需要批量给每个域名都建一个 contact@ 邮箱，能自动跑吗",
+    "should_trigger": true
+  },
+  {
+    "query": "用 openclaw 的浏览器自动化帮我在 cp.hostclub.org 后台操作，给 abc.com 开通 Titan 免费试用然后建一个 info 邮箱",
+    "should_trigger": true
+  },
+  {
+    "query": "hostclub 后台的域名 xyz.org 之前已经创建过 contact@xyz.org 了，我想确认一下是不是已经存在，不要重复创建",
+    "should_trigger": true
+  },
+  {
+    "query": "我需要一个自动化脚本，能登录 hostclub 管理后台，自动导航到指定域名的订单页面，检查邮箱状态后创建新邮箱",
+    "should_trigger": true
+  },
+  {
+    "query": "之前用 titan email 免费试用给 example.com 建了一个邮箱，现在想再加一个 hr@ 的，帮我看看额度还够不够",
+    "should_trigger": true
+  },
+  {
+    "query": "需要在无人值守的服务器上自动化跑企业邮箱创建，域名在 hostclub 管理，邮箱用的是 titan，能配置成定时任务吗",
+    "should_trigger": true
+  },
+  {
+    "query": "给我在 namesilo 上注册一个新域名 newdomain.com",
+    "should_trigger": false
+  },
+  {
+    "query": "帮我配置一下 Cloudflare 的 DNS 记录，把 MX 记录指向 Google Workspace",
+    "should_trigger": false
+  },
+  {
+    "query": "我想给 Gmail 设置一个自定义域名邮箱，用 Google Workspace",
+    "should_trigger": false
+  },
+  {
+    "query": "openclaw 的浏览器 profile 怎么创建？我想给不同的网站用不同的浏览器环境",
+    "should_trigger": false
+  },
+  {
+    "query": "帮我写一个 Python 脚本发送邮件，用 SMTP 协议，发件人是 sales@visionate.net",
+    "should_trigger": false
+  },
+  {
+    "query": "我在 Zoho Mail 后台需要添加一个新的邮箱用户，能帮我自动化一下吗",
+    "should_trigger": false
+  },
+  {
+    "query": "hostclub 上买的域名快到期了，帮我看看怎么续费",
+    "should_trigger": false
+  },
+  {
+    "query": "我想配置 OpenClaw 的 relay provider，把 API 请求转发到另一个模型",
+    "should_trigger": false
+  },
+  {
+    "query": "帮我在 manage.titan.email 上重置 contact@wavelengthpulsmk.com 的密码",
+    "should_trigger": false
+  },
+  {
+    "query": "我的 hostclub 后台登不上去了，显示验证码，能帮我看看怎么回事吗",
+    "should_trigger": false
+  }
+]

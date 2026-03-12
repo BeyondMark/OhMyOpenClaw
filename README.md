@@ -43,6 +43,18 @@
   - `scripts/install_agent_browser.sh`
   - `scripts/verify_agent_browser.sh`
 
+### `openclaw-permission-config`
+
+- 目录：`skills/openclaw-permission-config/`
+- 人类说明：`skills/openclaw-permission-config/README.md`
+- 作用：引导用户在不同版本的 OpenClaw 中配置权限，覆盖 Sandbox、Tool Policy、Elevated、Exec Approvals、Gateway Auth 五大权限层
+- 规则：先检测版本和现有配置，审计五个维度的权限状态，根据部署场景推荐预设，应用后用 `openclaw doctor --security` 验证
+- 入口脚本：
+  - `scripts/detect_environment.sh`
+  - `scripts/audit_permissions.sh`
+  - `scripts/apply_config.sh`
+  - `scripts/verify_permissions.sh`
+
 ## 说明
 
 - 根目录 `README.md` 只保留目录导航。
