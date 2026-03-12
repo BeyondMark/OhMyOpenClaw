@@ -1,6 +1,6 @@
 ---
 name: openclaw-mail-setup
-description: "Automate enterprise email (企业邮箱) creation on Hostclub (hostclub.org) and Titan Email (manage.titan.email) via OpenClaw browser automation. Always use this skill when the user mentions: creating mailboxes on hostclub or Titan, checking Titan Email status or quota, starting a Titan free trial, batch domain email setup, navigating cp.hostclub.org, or any unattended/automated email account provisioning for domains managed through Hostclub. Also triggers for: 域名邮箱创建, hostclub 后台操作, Titan 邮箱额度检查, 批量建邮箱, 无人值守邮箱自动化. Handles login-state detection, domain routing, idempotent creation, quota checking, and structured result reporting in a headless browser profile."
+description: "Automate enterprise email (企业邮箱) creation on Hostclub (hostclub.org) and Titan Email (mailhostbox.titan.email) via OpenClaw browser automation. Always use this skill when the user mentions: creating mailboxes on hostclub or Titan, checking Titan Email status or quota, starting a Titan free trial, batch domain email setup, navigating cp.hostclub.org, or any unattended/automated email account provisioning for domains managed through Hostclub. Also triggers for: 域名邮箱创建, hostclub 后台操作, Titan 邮箱额度检查, 批量建邮箱, 无人值守邮箱自动化. Handles login-state detection, domain routing, idempotent creation, quota checking, and structured result reporting in a headless browser profile."
 ---
 
 # OpenClaw Mail Setup
@@ -26,6 +26,7 @@ The browser automation steps (navigation, clicks, form fills) are performed by t
 
 For the detailed Hostclub/Titan navigation flow, read `references/hostclub-flow.md`.
 For account table and domain table schemas, read `references/config-schema.md`.
+For OpenClaw browser CLI commands and ref 歧义处理, read `references/browser-commands.md`.
 
 ## Required Inputs
 
@@ -91,13 +92,14 @@ In production mode (when account/domain tables exist), only `domain` and `mailbo
 
 8. Detect login state by checking the page content:
 
-   - If the page contains text matching the pattern `欢迎 *!` (e.g., `欢迎 Yuan Jian!`), the session is active. Skip to Phase 3.
+   - If the page contains text matching the pattern `欢迎 ` (e.g., `欢迎 Yuan Jian !`，注意 `!` 前有空格), the session is active. Skip to Phase 3.
    - If the page shows a login form or the URL contains `login`, proceed with authentication.
    - Do not rely solely on cookies; always check rendered page content.
 
 9. If not logged in:
 
-   - Fill in the username and password fields.
+   - **注意**: 登录页面同时包含登录表单和注册表单，两者都有 text/password 输入框。直接使用 snapshot ref 可能匹配到错误的表单。
+   - 使用 `openclaw browser evaluate --fn` 或 `openclaw browser fill --fields-file` 方式，通过字段 name 属性（`txtUserName`, `txtPassword`）精确定位登录表单字段。详见 `references/browser-commands.md` 的 "处理 Ref 歧义" 章节。
    - Submit the login form.
    - Wait for the page to load and verify login succeeded (look for `欢迎` text).
    - If login fails due to wrong credentials, stop immediately and return a `failed` result.
@@ -106,11 +108,11 @@ In production mode (when account/domain tables exist), only `domain` and `mailbo
 
 ### Phase 3: Navigate to Domain
 
-10. From the Hostclub homepage (logged in), click on the account menu (the `欢迎 *!` element) and select `我的账号`.
+10. From the Hostclub homepage (logged in),进入账号管理区域。`欢迎 <用户名> !` 文本在 `<li>` 元素内不可直接点击，其内部包含 `我的账号` 链接 (`href="javascript:void(0)"`)。必须使用 `openclaw browser evaluate --fn` 方式点击该链接。详见 `references/hostclub-flow.md` Step 4。
 
-11. The system redirects through `content.php?action=cp_login` to `cp.hostclub.org`.
+11. The system redirects through SSO token (`CustomerIndexServlet?redirectpage=null&userLoginId=...`) to `cp.hostclub.org`.
 
-12. On the `cp.hostclub.org` management center, locate the order search field (`跳转到订单`), enter the target domain, and navigate to the domain's order detail page.
+12. On the `cp.hostclub.org` management center, locate the search field (placeholder: `输入域名或订单号`), enter the target domain, and navigate to the domain's order detail page. 在域名详情页上，还有一个 `跳转到域名` 搜索字段可用于域名间跳转。
 
 13. If the domain is not found in the account, stop and return a `failed` result with an appropriate error message.
 
@@ -127,12 +129,12 @@ In production mode (when account/domain tables exist), only `domain` and `mailbo
 16. Based on status:
 
     - If not enabled: click `Start Free Trial Now`, wait for activation, then proceed to the Titan admin panel. When creation succeeds in this path, use status `trial_started` (not `created`) to distinguish first-time activation from subsequent creations.
-    - If enabled and quota not reached: click `Go to Admin Panel`.
-    - If quota reached: still click `Go to Admin Panel` to enter the Titan panel and check the existing mailbox list. If `mailboxName@domain` is already in the list, return `already_exists`. If the target mailbox is not in the list, return `quota_reached`.
+    - If enabled and quota not reached: click `Login to Webmail` 链接进入 Titan 管理面板（`mailhostbox.titan.email`）。**注意**: `Go to Admin Panel` 是纯文本标签，不可点击/不可交互，不要尝试点击它。
+    - If quota reached: still click `Login to Webmail` to enter the Titan panel and check the existing mailbox list. If `mailboxName@domain` is already in the list, return `already_exists`. If the target mailbox is not in the list, return `quota_reached`.
 
 ### Phase 5: Idempotency Check and Mailbox Creation
 
-17. In the Titan admin panel (`manage.titan.email/email-accounts`), check the existing mailbox list.
+17. In the Titan admin panel (`mailhostbox.titan.email`), check the existing mailbox list.
 
 18. **Idempotency**: if `mailboxName@domain` already appears in the list, do not create it again. Return `already_exists` with `success: true`.
 
@@ -241,7 +243,7 @@ Every execution must return this JSON structure:
 
 - `emailEnabled`: set to `true` if the domain order page shows a `Titan Email (Global)` section with `Business (Free Trial)` or any active status. `false` if no Titan section or only a `Start Free Trial Now` button.
 - `trialStarted`: `true` if the free trial has been activated (either previously or during this execution). `false` only if the domain has never had Titan Email enabled.
-- `adminPanelAccessible`: `true` if the skill successfully navigated to `manage.titan.email`. `false` if the panel was unreachable (SSO failure, timeout, etc.).
+- `adminPanelAccessible`: `true` if the skill successfully navigated to `mailhostbox.titan.email`. `false` if the panel was unreachable (SSO failure, timeout, etc.).
 - `mailboxQuotaReached`: `true` if `TOTAL EMAIL ACCOUNTS` shows the maximum (e.g., `1/1`). `false` otherwise.
 - `canCreateAnotherMailbox`: `true` only when all three conditions are met: `emailEnabled=true`, `adminPanelAccessible=true`, and `mailboxQuotaReached=false`. If any condition fails, this is `false` — even when quota is not reached, an unreachable admin panel means creation is impossible.
 - `status` distinction: use `trial_started` when the free trial was activated during this execution (Phase 4 step 16, "not enabled" branch). Use `created` when the trial was already active and the mailbox was created normally.
@@ -274,7 +276,7 @@ Login (first domain only)
   → Domain C: check status → create mailbox → record result
 ```
 
-Login happens once. Subsequent domains reuse the same session. Switching domains does not require going back to `hostclub.org` — navigate directly on `cp.hostclub.org` using the order search field (`跳转到订单`).
+Login happens once. Subsequent domains reuse the same session. Switching domains does not require going back to `hostclub.org` — navigate directly on `cp.hostclub.org` using搜索字段（管理中心: `输入域名或订单号`；域名详情页: `跳转到域名`）。
 
 ### Session Expiry During Batch
 
@@ -347,4 +349,5 @@ Examples: `hostclub-001`, `hostclub-002`, `namesilo-001`
 ### references/
 
 - `references/hostclub-flow.md`: step-by-step Hostclub/Titan navigation flow with element selectors
+- `references/browser-commands.md`: OpenClaw browser CLI 命令速查和 ref 歧义处理指南
 - `references/config-schema.md`: account table and domain table JSON schemas with examples

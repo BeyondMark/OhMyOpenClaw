@@ -70,7 +70,7 @@ case "$ACTION" in
   check)
     validate_name "$PROFILE_NAME"
     # Check if profile exists by listing profiles and searching
-    if openclaw browser list-profiles 2>/dev/null | grep -q "^${PROFILE_NAME}$"; then
+    if openclaw browser profiles 2>/dev/null | grep -q "^${PROFILE_NAME}$"; then
       if $JSON_OUTPUT; then
         echo "{\"success\": true, \"exists\": true, \"profileName\": \"$PROFILE_NAME\"}"
       else
@@ -107,7 +107,7 @@ case "$ACTION" in
     ;;
 
   list)
-    profiles=$(openclaw browser list-profiles 2>/dev/null || true)
+    profiles=$(openclaw browser profiles 2>/dev/null || true)
     if $JSON_OUTPUT; then
       echo "$profiles" | jq -R -s 'split("\n") | map(select(. != "")) | {success: true, profiles: .}'
     else
