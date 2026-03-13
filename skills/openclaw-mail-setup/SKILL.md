@@ -32,24 +32,24 @@ For OpenClaw browser CLI commands and ref 歧义处理, read `references/browser
 
 The skill supports two operation modes based on whether `mailboxName` is provided:
 
-### Query Mode (3 fields — check email status only)
+### Query Mode (check email status only)
 
-| Field | Description | Example |
-|-------|-------------|---------|
-| `username` | Hostclub backend login account | `monetize@visionate.net` |
-| `password` | Hostclub backend login password | `***` |
-| `domain` | Target domain name | `visionate.net` |
+| Field | Required | Description | Example |
+|-------|----------|-------------|---------|
+| `domain` | always | Target domain name | `visionate.net` |
+| `username` | direct mode only | Hostclub backend login account | `monetize@visionate.net` |
+| `password` | direct mode only | Hostclub backend login password (明文) | `***` |
 
 Query mode executes Phase 1–4 only: login, navigate to domain, check Titan Email status (enabled/trial/quota), list existing mailboxes, then return the result. No mailbox is created.
 
-### Create Mode (4 fields — create a mailbox)
+### Create Mode (create a mailbox)
 
-| Field | Description | Example |
-|-------|-------------|---------|
-| `username` | Hostclub backend login account | `monetize@visionate.net` |
-| `password` | Hostclub backend login password | `***` |
-| `domain` | Target domain name | `visionate.net` |
-| `mailboxName` | Email prefix to create | `sales` |
+| Field | Required | Description | Example |
+|-------|----------|-------------|---------|
+| `domain` | always | Target domain name | `visionate.net` |
+| `mailboxName` | always | Email prefix to create | `sales` |
+| `username` | direct mode only | Hostclub backend login account | `monetize@visionate.net` |
+| `password` | direct mode only | Hostclub backend login password (明文) | `***` |
 
 Create mode executes the full Phase 1–6 workflow. The resulting mailbox will be: `mailboxName@domain` (e.g., `sales@visionate.net`).
 
@@ -57,7 +57,9 @@ The mailbox password is not supplied by the caller. The skill generates a strong
 
 ### Production Config Mode
 
-In production mode (when account/domain tables exist), only `domain` is needed for query, or `domain` and `mailboxName` for create. The skill resolves account credentials and browser profile from the config files. The account table also provides `provider` (platform identifier for multi-platform routing) and `loginUrl` (so the login address is not hardcoded).
+In production mode (when account/domain tables exist **and** the caller does not provide `username`/`password`), only `domain` is needed for query, or `domain` and `mailboxName` for create. The skill resolves account credentials and browser profile from the config files. The account table also provides `provider` (platform identifier for multi-platform routing) and `loginUrl` (so the login address is not hardcoded).
+
+**注意**: 如果调用方同时提供了 `username` 和 `password`，即使配置文件存在，也使用 direct mode（调用方提供的明文凭证优先）。详见 Phase 1 Step 2 的判定逻辑。
 
 ## Workflow
 
@@ -65,27 +67,50 @@ In production mode (when account/domain tables exist), only `domain` is needed f
 
 1. Validate inputs:
 
-   - `username`, `password`, `domain` must be non-empty. `domain` must look like a valid domain.
+   - `domain` must be非空且是合法域名格式。
+   - 如果调用方提供了 `username` 和 `password`，两者都必须非空（不允许只提供其中一个）。
+   - 如果调用方未提供 `username`/`password`，则必须在 Step 2 中通过 config mode 解析凭证。
    - If `mailboxName` is provided, it must be a valid email local part. The skill runs in **create mode**.
    - If `mailboxName` is absent or empty, the skill runs in **query mode** (status check only, no creation).
 
 2. Determine credential mode:
 
-   - **Config mode** (account/domain tables exist): run the config check script, resolve account from domain mapping, decrypt password.
-   - **Direct mode** (no config tables): use the raw inputs directly.
+   Mode selection follows **caller-provided credentials优先** 原则，按以下顺序判定：
 
-   ```bash
-   # Check if config files exist and are valid
-   ./scripts/check_config.sh --json
+   - **Direct mode**（调用方提供了 `username` 和 `password`）: 直接使用调用方提供的明文凭证。**不运行** `decrypt_password.sh`，不查询 account table。即使配置文件存在也不进入 config mode。
+   - **Config mode**（调用方未提供 `username`/`password`，且 account/domain tables 存在）: 运行 config check script，从 domain table 解析 `accountId`，再从 account table 解密密码。
+   - **错误**: 调用方未提供凭证，且配置文件不存在或无效 → 立即停止，报告缺少凭证。
+
+   判定伪代码：
+
+   ```
+   if caller provided username AND password:
+       mode = "direct"
+       # 使用调用方提供的明文 username 和 password，跳过 Step 3
+   else:
+       run ./scripts/check_config.sh --json
+       if config valid AND domain found in domain table:
+           mode = "config"
+           # 从 config 解析凭证，进入 Step 3
+       elif config valid AND domain NOT in domain table:
+           # 配置存在但目标域名未配置
+           stop with error: "Domain '<domain>' not found in domain table. Provide username and password for direct mode."
+       else:
+           stop with error: "No credentials provided and config files not available."
    ```
 
-3. In config mode, decrypt the password:
+   **⚠️ 关键规则**: 调用方提供的 `password` 是**明文密码**，绝对不要对其运行 `decrypt_password.sh`。只有 config mode 下从 `accounts.json` 读取的 `passwordEncrypted` 字段才需要解密。
+
+3. **仅在 config mode 下**解密密码:
 
    ```bash
+   # 仅当 Step 2 判定为 config mode 时执行。Direct mode 跳过此步骤。
    ./scripts/decrypt_password.sh --account-id <account-id> --json
    ```
 
    This requires the `OPENCLAW_SECRET_KEY` environment variable. If the variable is missing, stop and report the error.
+
+   **禁止**: 在 direct mode 下运行此脚本。调用方提供的密码已经是明文，解密会产生乱码导致登录失败。
 
 4. In config mode, read `loginUrl` from the account table. In direct mode, default to `https://www.hostclub.org/login.php`.
 
@@ -385,6 +410,7 @@ Production environments should implement a profile-level lock to enforce serial 
 
 - **Password encryption**: passwords are stored as AES-256-CBC encrypted Base64 strings in the `passwordEncrypted` field. The encryption key comes from the `OPENCLAW_SECRET_KEY` environment variable — it must never appear in config files, code, or logs.
 - **Password handling**: decrypted Hostclub passwords must be used immediately and discarded. Generated mailbox passwords must be returned once in structured output, then treated as caller-managed secrets. Never cache them in local files, log them, or include them in screenshots.
+- **禁止对明文密码解密**: 调用方提供的 `password` 字段是明文，绝对不要传给 `decrypt_password.sh`。只有从 `accounts.json` 的 `passwordEncrypted` 字段读取的值才需要解密。对明文运行 AES 解密会产生乱码，导致登录失败（账号密码不匹配）。
 - **Profile data isolation**: browser profile data directories must be readable only by the OpenClaw runtime user (`chmod 700`). Other users must not have read access.
 - Do not silently overwrite existing browser profiles.
 - Do not attempt to create a mailbox if quota is reached — check first.
