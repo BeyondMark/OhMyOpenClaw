@@ -191,7 +191,7 @@ In production mode (when account/domain tables exist **and** the caller does not
    - **两者都没有**（如被重定向到首页，只有 `登录/注册` 链接）→ 重新导航到 `https://www.hostclub.org/login.php`，然后再次检查。**最多重试 3 次**。如果 3 次后仍无法识别页面状态，返回 `failed`，error: `Unable to detect login state after 3 navigation attempts`。
    - Do not rely solely on cookies; always check rendered page content.
 
-10. If not logged in,使用 `browser_run_code` 一次性完成填写和提交:
+10. If not logged in,使用 `browser_run_code` 一次性完成填写、验证和提交:
 
     ```
     工具: browser_run_code
@@ -199,11 +199,22 @@ In production mode (when account/domain tables exist **and** the caller does not
       async (page) => {
         await page.locator('input[name=txtUserName]').fill('<username>');
         await page.locator('input[name=txtPassword]').fill('<password>');
+
+        // 提交前验证：确认值已正确写入登录表单字段
+        const actualUser = await page.locator('input[name=txtUserName]').inputValue();
+        const actualPass = await page.locator('input[name=txtPassword]').inputValue();
+        if (actualUser !== '<username>' || actualPass !== '<password>') {
+          return { error: 'Fill verification failed', actualUser, actualPass };
+        }
+
         await page.locator('input[name=txtUserName]').evaluate(el =>
           HTMLFormElement.prototype.submit.call(el.form)
         );
+        return { submitted: true };
       }
     ```
+
+    **提交前验证**: 通过 `inputValue()` 读回实际值，与预期值比对。如果不一致说明填入了错误的字段，必须停止并报错，**绝对不要带着错误凭证提交**（会触发账号锁定）。
 
     **为什么必须用 `input[name=...]` 定位**: 登录页面 HTML 中同时存在登录表单和隐藏的注册表单（共 22 个 input 字段）。`txtUserName` 和 `txtPassword` 是登录表单的唯一字段名。使用 snapshot ref 或 `browser_fill_form` 可能匹配到隐藏的注册表单字段（如 `name="email"`, `name="passwd"`），导致登录失败。
 

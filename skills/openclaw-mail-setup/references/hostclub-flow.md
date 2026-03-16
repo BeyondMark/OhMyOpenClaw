@@ -92,14 +92,24 @@ code: |
   async (page) => {
     await page.locator('input[name=txtUserName]').fill('<username>');
     await page.locator('input[name=txtPassword]').fill('<password>');
+
+    // 提交前验证：确认值已正确写入登录表单字段
+    const actualUser = await page.locator('input[name=txtUserName]').inputValue();
+    const actualPass = await page.locator('input[name=txtPassword]').inputValue();
+    if (actualUser !== '<username>' || actualPass !== '<password>') {
+      return { error: 'Fill verification failed', actualUser, actualPass };
+    }
+
     await page.locator('input[name=txtUserName]').evaluate(el =>
       HTMLFormElement.prototype.submit.call(el.form)
     );
+    return { submitted: true };
   }
 ```
 
 - `input[name=txtUserName]` — 登录表单邮箱字段（唯一）
 - `input[name=txtPassword]` — 登录表单密码字段（唯一）
+- `inputValue()` 读回验证 — 确保凭证写入了正确字段，不一致则停止，**不提交**
 - `HTMLFormElement.prototype.submit.call(el.form)` — 绕过表单内 `name="submit"` 按钮对 `form.submit()` 的覆盖
 
 **不要**使用以下方式:
