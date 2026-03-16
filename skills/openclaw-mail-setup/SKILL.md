@@ -191,20 +191,34 @@ In production mode (when account/domain tables exist **and** the caller does not
    - **两者都没有**（如被重定向到首页，只有 `登录/注册` 链接）→ 重新导航到 `https://www.hostclub.org/login.php`，然后再次检查。**最多重试 3 次**。如果 3 次后仍无法识别页面状态，返回 `failed`，error: `Unable to detect login state after 3 navigation attempts`。
    - Do not rely solely on cookies; always check rendered page content.
 
-10. If not logged in:
+10. If not logged in,使用 `browser_run_code` 一次性完成填写和提交:
 
-    - **注意**: 登录页面同时包含登录表单和注册表单，两者都有 text/password 输入框。直接使用 snapshot ref 可能匹配到错误的表单。
-    - 使用 `browser_evaluate` 或 `browser_run_code`，通过字段 name 属性（`txtUserName`, `txtPassword`）精确定位登录表单字段。详见 `references/browser-commands.md` 的 "处理 Ref 歧义" 章节。
-    - **不要**通过匹配"登录"文字来寻找提交按钮——页面顶部有 `登录/注册` 导航链接，匹配文字会点到导航而非表单提交。应直接提交登录表单本身（`HTMLFormElement.prototype.submit.call(form)`）或精确定位表单内的提交按钮。
-    - Submit the login form.
-    - Wait for the page to load.
-    - **登录结果检测**: 不要仅依赖 `browser_snapshot` 判断结果（精简 snapshot 可能不包含错误横幅文本，实测已确认）。必须使用 `browser_evaluate` 执行 `() => document.body.innerText` 获取完整页面文本，然后按以下优先级检查：
+    ```
+    工具: browser_run_code
+    code: |
+      async (page) => {
+        await page.locator('input[name=txtUserName]').fill('<username>');
+        await page.locator('input[name=txtPassword]').fill('<password>');
+        await page.locator('input[name=txtUserName]').evaluate(el =>
+          HTMLFormElement.prototype.submit.call(el.form)
+        );
+      }
+    ```
+
+    **为什么必须用 `input[name=...]` 定位**: 登录页面 HTML 中同时存在登录表单和隐藏的注册表单（共 22 个 input 字段）。`txtUserName` 和 `txtPassword` 是登录表单的唯一字段名。使用 snapshot ref 或 `browser_fill_form` 可能匹配到隐藏的注册表单字段（如 `name="email"`, `name="passwd"`），导致登录失败。
+
+    **不要**用以下方式填写登录表单:
+    - `browser_fill_form` — 可能匹配隐藏注册字段
+    - `browser_type` + snapshot ref — ref 可能匹配到注册表单的同类型输入框
+    - 通过匹配"登录"文字寻找提交按钮 — 页面顶部有 `登录/注册` 导航链接会被误匹配
+
+    提交后等待页面加载，用 `browser_evaluate` 执行 `() => document.body.innerText` 获取完整页面文本，按以下优先级检查登录结果：
       - 包含 `欢迎` → 登录成功，继续。
       - 包含 `无效的用户名或密码` / `invalid` / `login attempts remaining` → 密码错误，**立即停止**，返回 `failed`。不要重试（重复尝试会触发账号锁定）。
       - 包含 `locked` / `锁定` → 账号锁定，返回 `needs_human`。
       - 出现 CAPTCHA / 验证码 / 2FA 提示 → 返回 `needs_human`。
-    - **登录成功后保存 storageState**: 调用 `browser_run_code` 将 cookie 保存到 profile 的 `storage-state.json`，供下次会话复用。详见 `references/hostclub-flow.md` Step 3 "登录结果检测" 章节。
-    - 详见 `references/hostclub-flow.md` Step 3。
+
+    **登录成功后保存 storageState**: 调用 `browser_run_code` 将 cookie 保存到 profile 的 `storage-state.json`，供下次会话复用。详见 `references/hostclub-flow.md` Step 3。
 
 ### Phase 3: Navigate to Domain
 

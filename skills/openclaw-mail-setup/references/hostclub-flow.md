@@ -84,41 +84,28 @@ code: |
 
 ### Step 3: Login (if needed)
 
-**重要**: 登录页面同时包含登录表单和注册表单，两者都有 text/password 类型的输入框。snapshot ref 可能存在歧义。
-
-实际字段名：
-- 用户名: `txtUserName` (type=text)
-- 密码: `txtPassword` (type=password)
-
-**推荐方式**: 使用 `browser_evaluate` 通过字段 name 精确填写，或使用 `browser_run_code`:
+**必须使用 `browser_run_code`** 一次性完成登录表单填写和提交。登录页面 HTML 中同时存在登录表单（2 个可见字段）和隐藏的注册表单（20 个隐藏字段）。使用 snapshot ref 或 `browser_fill_form` 可能匹配到隐藏的注册字段，导致登录失败。
 
 ```
-# 方式 1: 使用 browser_evaluate 精确定位字段
-工具: browser_evaluate
-参数: { function: "() => { document.querySelector('input[name=txtUserName]').value = 'user@example.com' }" }
-
-工具: browser_evaluate
-参数: { function: "() => { document.querySelector('input[name=txtPassword]').value = 'password123' }" }
-
-# 提交表单 — 不要用 form.submit()，因为表单内有 name="submit" 的按钮会覆盖该方法
-工具: browser_evaluate
-参数: { function: "() => { HTMLFormElement.prototype.submit.call(document.querySelector('input[name=txtUserName]').form) }" }
-```
-
-```
-# 方式 2: 使用 browser_run_code (推荐)
 工具: browser_run_code
 code: |
   async (page) => {
-    await page.locator('input[name=txtUserName]').fill('user@example.com');
-    await page.locator('input[name=txtPassword]').fill('password123');
+    await page.locator('input[name=txtUserName]').fill('<username>');
+    await page.locator('input[name=txtPassword]').fill('<password>');
     await page.locator('input[name=txtUserName]').evaluate(el =>
       HTMLFormElement.prototype.submit.call(el.form)
     );
   }
 ```
 
-**不要**通过匹配"登录"文字来寻找提交按钮。页面顶部有 `登录/注册` 导航链接，模糊匹配会点到导航而非表单提交按钮。
+- `input[name=txtUserName]` — 登录表单邮箱字段（唯一）
+- `input[name=txtPassword]` — 登录表单密码字段（唯一）
+- `HTMLFormElement.prototype.submit.call(el.form)` — 绕过表单内 `name="submit"` 按钮对 `form.submit()` 的覆盖
+
+**不要**使用以下方式:
+- `browser_fill_form` — 可能匹配隐藏注册字段
+- `browser_type` + snapshot ref — ref 可能歧义
+- 匹配"登录"文字找按钮 — 页面顶部有 `登录/注册` 导航链接会被误匹配
 
 #### 登录结果检测
 
