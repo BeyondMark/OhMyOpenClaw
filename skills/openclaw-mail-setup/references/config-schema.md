@@ -69,8 +69,8 @@ Recommended: `acct_{provider}_{sequence}` (e.g., `acct_hostclub_001`).
   "domains": {
     "<domain-name>": {
       "accountId": "<account-id>",
-      "mailbox": "<email-address-or-null>",
-      "mailboxCreatedAt": "<iso8601-or-null>",
+      "mailboxes": ["<email-address>"],
+      "lastMailboxCreatedAt": "<iso8601-or-null>",
       "lastStatus": "<status-string-or-null>",
       "lastUpdatedAt": "<iso8601-or-null>"
     }
@@ -83,17 +83,18 @@ Recommended: `acct_{provider}_{sequence}` (e.g., `acct_hostclub_001`).
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `accountId` | string | yes | Reference to account table entry |
-| `mailbox` | string\|null | yes | Created mailbox address, or null if not yet created |
-| `mailboxCreatedAt` | string\|null | yes | ISO 8601 creation timestamp, or null |
+| `mailboxes` | string[] | yes | Array of created mailbox addresses (empty array `[]` if none created yet) |
+| `lastMailboxCreatedAt` | string\|null | yes | ISO 8601 timestamp of the most recent mailbox creation, or null |
 | `lastStatus` | string\|null | no | Last operation status (created, already_exists, quota_reached, failed, needs_human) |
 | `lastUpdatedAt` | string\|null | no | ISO 8601 timestamp of last status update |
 
 ### Notes
 
-- During free trial, each domain supports only 1 mailbox, so `mailbox` is a single value, not an array.
-- After successful creation, `update_domain_status.sh` writes back `mailbox`, `mailboxCreatedAt`, `lastStatus`, and `lastUpdatedAt`.
+- The free trial quota varies by domain (currently 2 accounts for new trials; some legacy domains may still have 1). Do not hardcode the quota — always parse `TOTAL EMAIL ACCOUNTS X/Y` from the page.
+- `mailboxes` is an array to support multi-mailbox quotas. `update_domain_status.sh` appends new addresses and deduplicates.
+- After successful creation, `update_domain_status.sh` writes back `mailboxes`, `lastMailboxCreatedAt`, `lastStatus`, and `lastUpdatedAt`.
 - Generated mailbox passwords are not persisted in `domains.json`. The caller must store the returned password securely if it needs to be reused later.
-- The scheduler can skip domains where `mailbox` is not null and `lastStatus` is `created` or `already_exists`.
+- The scheduler can skip a domain for a given `mailboxName` if `mailboxes` already contains `mailboxName@domain`. To determine whether the domain has remaining quota, the scheduler must either check `lastStatus == "quota_reached"` or invoke the skill in query mode.
 
 ### Example
 
@@ -102,24 +103,24 @@ Recommended: `acct_{provider}_{sequence}` (e.g., `acct_hostclub_001`).
   "domains": {
     "visionate.net": {
       "accountId": "acct_hostclub_001",
-      "mailbox": "sales@visionate.net",
-      "mailboxCreatedAt": "2026-02-15T10:30:00Z",
+      "mailboxes": ["sales@visionate.net"],
+      "lastMailboxCreatedAt": "2026-02-15T10:30:00Z",
       "lastStatus": "created",
       "lastUpdatedAt": "2026-02-15T10:30:00Z"
     },
     "abc.com": {
       "accountId": "acct_hostclub_001",
-      "mailbox": null,
-      "mailboxCreatedAt": null,
+      "mailboxes": [],
+      "lastMailboxCreatedAt": null,
       "lastStatus": null,
       "lastUpdatedAt": null
     },
     "wavelengthpulsmk.com": {
       "accountId": "acct_hostclub_001",
-      "mailbox": "contact@wavelengthpulsmk.com",
-      "mailboxCreatedAt": "2026-02-10T08:00:00Z",
-      "lastStatus": "already_exists",
-      "lastUpdatedAt": "2026-03-01T14:22:00Z"
+      "mailboxes": ["contact@wavelengthpulsmk.com", "sales@wavelengthpulsmk.com"],
+      "lastMailboxCreatedAt": "2026-03-01T14:22:00Z",
+      "lastStatus": "quota_reached",
+      "lastUpdatedAt": "2026-03-10T09:00:00Z"
     }
   }
 }

@@ -219,7 +219,7 @@ openclaw browser snapshot --browser-profile <profile> --labels --efficient
 
 #### State C: Quota判断
 
-- 检查 `TOTAL EMAIL ACCOUNTS` 后的数字（如 `0/1` 表示有空位，`1/1` 表示已满）
+- 从 `TOTAL EMAIL ACCOUNTS` 后的文本解析 `X/Y`（如 `0/2` 表示有空位，`2/2` 表示已满）。X 是已用数量，Y 是总配额。配额已满的判定条件：`X >= Y`。
 - 也可以看 `Account(s)` 按钮上的数字
 
 ### Step 8: Enter Titan Panel
@@ -295,8 +295,8 @@ openclaw browser snapshot --browser-profile <profile> --labels --efficient
 
 当 JWT 认证失败无法进入管理面板时，处理策略：
 1. 将 `adminPanelAccessible` 设为 `false`
-2. 依据 Phase 4 从域名详情页获取的配额信息（如 `TOTAL EMAIL ACCOUNTS 1/1`）判断状态
-3. 如果配额已满，返回 `quota_reached`
+2. 依据 Phase 4 从域名详情页获取的配额信息（如 `TOTAL EMAIL ACCOUNTS X/Y`）判断状态
+3. 如果配额已满（X >= Y），返回 `quota_reached`
 4. 如果配额未满，返回 `failed`，error: `Titan admin panel authentication failed`
 
 ### Step 10: Read Existing Mailboxes
@@ -306,7 +306,7 @@ openclaw browser snapshot --browser-profile <profile> --labels --efficient
 On the email accounts page, read the list of existing mailbox accounts. Note:
 
 - The email address displayed (e.g., `contact@wavelengthpulsmk.com`).
-- The total count indicator (e.g., `1/1`).
+- The total count indicator (e.g., `1/2` or `2/2`).
 
 ## Mailbox Creation
 
@@ -315,8 +315,8 @@ On the email accounts page, read the list of existing mailbox accounts. Note:
 Before creating, compare `mailboxName@domain` against the existing mailbox list.
 
 - If found: return `already_exists` immediately. No further action needed.
-- If not found and quota available: proceed to creation.
-- If not found and quota reached: return `quota_reached`.
+- If not found and quota available (used < total): proceed to creation.
+- If not found and quota reached (used >= total): return `quota_reached`.
 
 ### Step 12: Create Mailbox
 

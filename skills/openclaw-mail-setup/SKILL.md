@@ -174,14 +174,14 @@ In production mode (when account/domain tables exist **and** the caller does not
 
     - **Not enabled**: no Titan Email section, or a `Start Free Trial Now` button is visible.
     - **Enabled (trial active)**: `Business (Free Trial)` label is visible, along with `TOTAL EMAIL ACCOUNTS X/Y`.
-    - **Quota reached**: `TOTAL EMAIL ACCOUNTS` shows `1/1` (or max reached).
+    - **Quota reached**: `TOTAL EMAIL ACCOUNTS` shows `X/Y` where X equals Y (e.g., `1/1`, `2/2`). Parse both numbers; quota is reached when `used >= total`.
 
 16. **Query mode**: if `mailboxName` is not provided, collect the status information from this page (emailEnabled, trialStarted, quota) and skip to Phase 6 to return the result with status `query_ok`. Do not click any buttons or navigate further. If the Titan section shows existing mailbox info, include it in `existingMailboxes`.
 
 17. **Create mode**: based on status:
 
     - If not enabled: click `Start Free Trial Now`, wait for activation（最多 30 秒，每 10 秒 snapshot 检查 `Business (Free Trial)` 和 `Go to Admin Panel` 是否出现）。超时则返回 `failed`，error: `Free trial activation timed out`。激活成功后继续进入 Titan 面板。When creation succeeds in this path, use status `trial_started` (not `created`) to distinguish first-time activation from subsequent creations.
-    - If enabled and quota not reached: 点击 `Go to Admin Panel` 按钮进入 Titan 管理面板（`manage.titan.email`）。该按钮位于 `MANAGE EMAIL ACCOUNTS` 区块内，是 `<span class="wp-btn-blue-hollow">` 元素，`cursor: pointer`，**可点击**。它在 closed shadow DOM 内，常规 `document.querySelector` 无法找到，必须通过 Playwright 的 `getByText('Go to Admin Panel')` 或 OpenClaw snapshot ref 来定位。**注意**: `Login to Webmail` 链接指向 `mailhostbox.titan.email`（终端用户邮箱登录页），**不要**用它来进入管理面板。
+    - If enabled and quota not reached (used < total): 点击 `Go to Admin Panel` 按钮进入 Titan 管理面板（`manage.titan.email`）。该按钮位于 `MANAGE EMAIL ACCOUNTS` 区块内，是 `<span class="wp-btn-blue-hollow">` 元素，`cursor: pointer`，**可点击**。它在 closed shadow DOM 内，常规 `document.querySelector` 无法找到，必须通过 Playwright 的 `getByText('Go to Admin Panel')` 或 OpenClaw snapshot ref 来定位。**注意**: `Login to Webmail` 链接指向 `mailhostbox.titan.email`（终端用户邮箱登录页），**不要**用它来进入管理面板。
     - If quota reached: still click `Go to Admin Panel` to enter the Titan admin panel and check the existing mailbox list. If `mailboxName@domain` is already in the list, return `already_exists`. If the target mailbox is not in the list, return `quota_reached`.
 
     **⚠️ 标签页切换**: `Go to Admin Panel` 会在新标签页打开 Titan 管理面板（URL: `manage.titan.email/partner/autoLogin?partnerId=...&jwt=...`，通过 JWT 自动认证，无需单独登录）。点击后必须执行以下步骤才能操作 Titan 页面：
@@ -197,13 +197,13 @@ In production mode (when account/domain tables exist **and** the caller does not
 18. Verify Titan panel access. **前提**: 已通过 Step 17 切换到 Titan 标签页。`Go to Admin Panel` 通过 JWT 自动认证，正常情况下会直接进入 `manage.titan.email/email-accounts` 管理面板。用 `openclaw browser evaluate --fn "location.href"` 确认 URL，详见 `references/hostclub-flow.md` Step 9。
 
     - **管理面板可达**: URL 包含 `manage.titan.email` 且显示邮箱列表页面 → 设 `adminPanelAccessible=true`，继续步骤 19。
-    - **管理面板不可达（JWT 过期或异常）**: 设 `adminPanelAccessible=false`。此时无法枚举已有邮箱，依据 Phase 4 获取的配额判断：配额已满返回 `quota_reached`，配额未满可尝试创建但无法做精确幂等性检查。
+    - **管理面板不可达（JWT 过期或异常）**: 设 `adminPanelAccessible=false`。此时无法枚举已有邮箱，依据 Phase 4 获取的配额判断：配额已满（used >= total）返回 `quota_reached`，配额未满可尝试创建但无法做精确幂等性检查。
 
 19. In the Titan admin panel, check the existing mailbox list (仅当 `adminPanelAccessible=true`).
 
 20. **Idempotency**: if `mailboxName@domain` already appears in the list, do not create it again. Return `already_exists` with `success: true`.
 
-21. If the target mailbox does not exist and quota allows:
+21. If the target mailbox does not exist and quota allows (used < total):
 
     - Generate a mailbox password before opening or submitting the creation form:
 
@@ -239,7 +239,7 @@ In production mode (when account/domain tables exist **and** the caller does not
       --json
     ```
 
-    The script also records `mailboxCreatedAt` (ISO 8601 timestamp) for successful creations.
+    The script appends the mailbox address to the `mailboxes` array in the domain table (deduplicating). It also records `lastMailboxCreatedAt` (ISO 8601 timestamp) for successful creations.
 
 24. Return the structured result (see Output Structure below).
 
@@ -305,8 +305,9 @@ Every execution must return this JSON structure:
   "trialStarted": true,
   "adminPanelAccessible": true,
   "existingMailboxes": ["sales@visionate.net"],
-  "mailboxQuotaReached": true,
-  "canCreateAnotherMailbox": false,
+  "mailboxQuota": {"used": 1, "total": 2},
+  "mailboxQuotaReached": false,
+  "canCreateAnotherMailbox": true,
 
   "error": null
 }
@@ -325,6 +326,7 @@ Every execution must return this JSON structure:
   "trialStarted": true,
   "adminPanelAccessible": false,
   "existingMailboxes": [],
+  "mailboxQuota": {"used": 0, "total": 2},
   "mailboxQuotaReached": false,
   "canCreateAnotherMailbox": false,
 
@@ -350,7 +352,8 @@ Every execution must return this JSON structure:
 - `trialStarted`: `true` if the free trial has been activated (either previously or during this execution). `false` only if the domain has never had Titan Email enabled.
 - `mailboxPassword`: the generated password used for creation. Set it only when a new mailbox was actually created (`status=created` or `status=trial_started`). For `query_ok`, `already_exists`, `quota_reached`, `failed`, and `needs_human`, set it to `null`.
 - `adminPanelAccessible`: `true` if the skill successfully navigated to `mailhostbox.titan.email`. `false` if the panel was unreachable (SSO failure, timeout, etc.). In query mode, this is always `false` because the skill does not navigate to the Titan panel.
-- `mailboxQuotaReached`: `true` if `TOTAL EMAIL ACCOUNTS` shows the maximum (e.g., `1/1`). `false` otherwise. In query mode, this is inferred from the domain order page text if visible.
+- `mailboxQuota`: an object `{"used": X, "total": Y}` parsed from the `TOTAL EMAIL ACCOUNTS X/Y` text on the domain order page. Both values are integers. If the Titan section is not visible, set to `null`. The free trial quota varies (currently 2 accounts for new trials, some legacy domains may still show 1).
+- `mailboxQuotaReached`: `true` if `mailboxQuota.used >= mailboxQuota.total`. `false` otherwise. In query mode, this is inferred from the domain order page text if visible.
 - `canCreateAnotherMailbox`: `true` only when all three conditions are met: `emailEnabled=true`, `adminPanelAccessible=true`, and `mailboxQuotaReached=false`. If any condition fails, this is `false` — even when quota is not reached, an unreachable admin panel means creation is impossible. In query mode, since `adminPanelAccessible` is always `false`, this field is always `false` — the caller should rely on `emailEnabled` and `mailboxQuotaReached` to infer availability.
 - `status` distinction: use `query_ok` in query mode. Use `trial_started` when the free trial was activated during this execution (Phase 4 step 17, "not enabled" branch). Use `created` when the trial was already active and the mailbox was created normally.
 

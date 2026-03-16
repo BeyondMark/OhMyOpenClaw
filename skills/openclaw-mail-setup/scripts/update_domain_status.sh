@@ -9,8 +9,8 @@
 #     [--json]
 #
 # Updates the domain entry in ~/.openclaw/mail/domains.json with:
-#   - mailbox: the created email address (or null if failed)
-#   - mailboxCreatedAt: ISO 8601 timestamp (or null)
+#   - mailboxes: array of created email addresses (appends new, deduplicates)
+#   - lastMailboxCreatedAt: ISO 8601 timestamp of most recent creation (or null)
 #   - lastStatus: the result status
 #   - lastUpdatedAt: current timestamp
 #
@@ -76,39 +76,39 @@ fi
 
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Determine mailbox and timestamp values based on status
+# Build the jq update expression based on status
 case "$STATUS" in
   created|trial_started)
-    MAILBOX_VALUE="\"$MAILBOX\""
-    CREATED_AT="\"$NOW\""
+    # Append mailbox to mailboxes array (deduplicate), update timestamp
+    JQ_EXPR='
+      .domains[$d].mailboxes = ((.domains[$d].mailboxes // []) + [$mailbox] | unique) |
+      .domains[$d].lastMailboxCreatedAt = $now |
+      .domains[$d].lastStatus = $status |
+      .domains[$d].lastUpdatedAt = $now'
     ;;
   already_exists)
-    # Mailbox exists but was not created now — preserve original mailboxCreatedAt
-    MAILBOX_VALUE="\"$MAILBOX\""
-    EXISTING_CREATED_AT=$(jq -r --arg d "$DOMAIN" '.domains[$d].mailboxCreatedAt // empty' "$DOMAINS_FILE")
-    if [[ -n "$EXISTING_CREATED_AT" ]]; then
-      CREATED_AT="\"$EXISTING_CREATED_AT\""
-    else
-      CREATED_AT="null"
-    fi
+    # Ensure mailbox is in the array but do not update creation timestamp
+    JQ_EXPR='
+      .domains[$d].mailboxes = ((.domains[$d].mailboxes // []) + [$mailbox] | unique) |
+      .domains[$d].lastStatus = $status |
+      .domains[$d].lastUpdatedAt = $now'
     ;;
   *)
-    MAILBOX_VALUE="null"
-    CREATED_AT="null"
+    # quota_reached, failed, needs_human — only update status fields, preserve mailboxes
+    JQ_EXPR='
+      .domains[$d].mailboxes = (.domains[$d].mailboxes // []) |
+      .domains[$d].lastStatus = $status |
+      .domains[$d].lastUpdatedAt = $now'
     ;;
 esac
 
 # Update the domain entry
 tmp_file=$(mktemp)
 jq --arg d "$DOMAIN" \
+   --arg mailbox "$MAILBOX" \
    --arg status "$STATUS" \
    --arg now "$NOW" \
-   --argjson mailbox "$MAILBOX_VALUE" \
-   --argjson createdAt "$CREATED_AT" \
-   '.domains[$d].mailbox = $mailbox |
-    .domains[$d].mailboxCreatedAt = $createdAt |
-    .domains[$d].lastStatus = $status |
-    .domains[$d].lastUpdatedAt = $now' \
+   "$JQ_EXPR" \
    "$DOMAINS_FILE" > "$tmp_file" && mv "$tmp_file" "$DOMAINS_FILE"
 
 if [[ $? -eq 0 ]]; then

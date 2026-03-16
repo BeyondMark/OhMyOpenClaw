@@ -4,25 +4,33 @@
     {
       "id": 1,
       "name": "create-new-mailbox-direct-mode",
-      "prompt": "使用 $openclaw-mail-setup 为域名 wavelengthpulsmk.com 创建一个 sales 邮箱。账号是 monetize@visionate.net，密码是 test123。这个域名的 Titan Email 已经开通，免费试用额度已满（1/1）。",
-      "expected_output": "Skill 应该：1) 检测到没有配置文件，使用直接模式；2) 启动浏览器 profile 并打开 login.php；3) 检测登录状态并登录；4) 导航到 wavelengthpulsmk.com 域名订单页；5) 检测到 TOTAL EMAIL ACCOUNTS 1/1 额度已满；6) 返回 status: quota_reached，success: false，mailboxPassword: null",
-      "notes": "原用例使用 visionate.net，但该域名在当前账号下搜不到（2026-03-12 实测）。已替换为 wavelengthpulsmk.com。由于额度已满，无法执行创建流程。",
+      "prompt": "使用 $openclaw-mail-setup 为域名 wavelengthpulsmk.com 创建一个 sales 邮箱。账号是 monetize@visionate.net，密码是 test123。这个域名的 Titan Email 已经开通，免费试用额度已满。",
+      "expected_output": "Skill 应该：1) 检测到没有配置文件，使用直接模式；2) 启动浏览器 profile 并打开 login.php；3) 检测登录状态并登录；4) 导航到 wavelengthpulsmk.com 域名订单页；5) 解析 TOTAL EMAIL ACCOUNTS X/Y 确认 X >= Y 额度已满；6) 返回 status: quota_reached，success: false，mailboxPassword: null，mailboxQuota: {used: X, total: Y}",
+      "notes": "原用例使用 visionate.net，但该域名在当前账号下搜不到（2026-03-12 实测）。已替换为 wavelengthpulsmk.com。配额判断基于页面实际 X/Y 值，不硬编码。",
       "files": []
     },
     {
       "id": 2,
       "name": "quota-reached-admin-panel-unreachable",
       "prompt": "用 $openclaw-mail-setup 在 wavelengthpulsmk.com 创建 contact 邮箱。hostclub 账号 monetize@visionate.net，密码 test123。注意这个域名之前已经创建过 contact@wavelengthpulsmk.com 了。",
-      "expected_output": "Skill 应该：1) 登录 hostclub；2) 导航到 wavelengthpulsmk.com 域名；3) 检测到 1/1 额度已满；4) 点击 Login to Webmail 尝试进入 Titan 面板；5) 如果落在终端用户登录页（adminPanelAccessible=false），返回 status: quota_reached；6) 如果成功进入管理面板，枚举到 contact@wavelengthpulsmk.com 已存在，返回 status: already_exists；7) mailboxPassword: null",
-      "notes": "实测 Login to Webmail 落在 mailhostbox.titan.email/login/ 终端用户登录页（2026-03-12），无法枚举邮箱列表。此时按 skill 降级分支，期望结果是 quota_reached 而非 already_exists。",
+      "expected_output": "Skill 应该：1) 登录 hostclub；2) 导航到 wavelengthpulsmk.com 域名；3) 解析 TOTAL EMAIL ACCOUNTS X/Y 判断配额状态；4) 点击 Go to Admin Panel 尝试进入 Titan 面板；5) 如果落在终端用户登录页（adminPanelAccessible=false）且配额已满，返回 status: quota_reached；6) 如果成功进入管理面板，枚举到 contact@wavelengthpulsmk.com 已存在，返回 status: already_exists；7) mailboxPassword: null",
+      "notes": "实测 Login to Webmail 落在 mailhostbox.titan.email/login/ 终端用户登录页（2026-03-12），无法枚举邮箱列表。Skill 现在使用 Go to Admin Panel 而非 Login to Webmail。配额判断基于动态 X/Y 解析。",
       "files": []
     },
     {
       "id": 3,
       "name": "quota-reached-different-mailbox",
-      "prompt": "帮我在 wavelengthpulsmk.com 域名下创建 hr 邮箱。hostclub 后台是 monetize@visionate.net / test123。这个域名已经有 contact@wavelengthpulsmk.com 了，免费试用只允许 1 个邮箱。",
-      "expected_output": "Skill 应该：1) 登录并导航到域名；2) 检测到 TOTAL EMAIL ACCOUNTS 1/1 额度已满；3) 如果能进入管理面板，确认 hr@wavelengthpulsmk.com 不在列表中，返回 quota_reached；4) 如果管理面板不可达，直接返回 quota_reached；5) success: false，mailboxPassword: null",
-      "notes": "无论管理面板是否可达，额度已满时结果都应该是 quota_reached。",
+      "prompt": "帮我在 wavelengthpulsmk.com 域名下创建 hr 邮箱。hostclub 后台是 monetize@visionate.net / test123。这个域名已经有已创建的邮箱了，免费试用额度已满。",
+      "expected_output": "Skill 应该：1) 登录并导航到域名；2) 解析 TOTAL EMAIL ACCOUNTS X/Y 确认配额已满（X >= Y）；3) 如果能进入管理面板，确认 hr@wavelengthpulsmk.com 不在列表中，返回 quota_reached；4) 如果管理面板不可达，直接返回 quota_reached；5) success: false，mailboxPassword: null",
+      "notes": "无论管理面板是否可达，额度已满时结果都应该是 quota_reached。配额判断不再硬编码为 1/1。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "create-second-mailbox-quota-available",
+      "prompt": "使用 $openclaw-mail-setup 为域名 example-domain.com 创建 info 邮箱。账号 monetize@visionate.net，密码 test123。这个域名已经有 sales@example-domain.com，但免费试用额度是 2 个邮箱。",
+      "expected_output": "Skill 应该：1) 登录并导航到域名；2) 解析 TOTAL EMAIL ACCOUNTS 显示 1/2（已用1，总共2）；3) 确认配额未满（1 < 2）；4) 进入 Titan 管理面板；5) 确认 info@example-domain.com 不在列表中；6) 创建邮箱并返回 status: created，mailboxQuota: {used: 1, total: 2}",
+      "notes": "新增用例：验证在配额 > 1 且有空位时，skill 能正确判断并执行创建。",
       "files": []
     }
   ]
