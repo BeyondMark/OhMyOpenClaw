@@ -1,15 +1,26 @@
 ---
 name: openclaw-mail-setup
-description: "Automate enterprise email (企业邮箱) creation on Hostclub (hostclub.org) and Titan Email (mailhostbox.titan.email) via OpenClaw browser automation. Always use this skill when the user mentions: creating mailboxes on hostclub or Titan, checking Titan Email status or quota, starting a Titan free trial, batch domain email setup, navigating cp.hostclub.org, or any unattended/automated email account provisioning for domains managed through Hostclub. Also triggers for: 域名邮箱创建, hostclub 后台操作, Titan 邮箱额度检查, 批量建邮箱, 无人值守邮箱自动化. Handles login-state detection, domain routing, idempotent creation, quota checking, and structured result reporting in a headless browser profile."
+description: "Automate enterprise email (企业邮箱) creation on Hostclub (hostclub.org) and Titan Email (mailhostbox.titan.email) via Playwright browser automation. Always use this skill when the user mentions: creating mailboxes on hostclub or Titan, checking Titan Email status or quota, starting a Titan free trial, batch domain email setup, navigating cp.hostclub.org, or any unattended/automated email account provisioning for domains managed through Hostclub. Also triggers for: 域名邮箱创建, hostclub 后台操作, Titan 邮箱额度检查, 批量建邮箱, 无人值守邮箱自动化. Handles login-state detection, domain routing, idempotent creation, quota checking, and structured result reporting via Playwright MCP."
 ---
 
-# OpenClaw Mail Setup
+# Mail Setup (Playwright)
 
 ## Overview
 
-Use this skill to create enterprise email accounts on Hostclub/Titan Email through browser automation, running unattended on an OpenClaw-managed browser profile.
+Use this skill to create enterprise email accounts on Hostclub/Titan Email through browser automation, powered by Playwright MCP.
 
 When referring to bundled files, resolve paths relative to this skill directory. Do not assume a user-specific checkout path.
+
+### 前置依赖: Playwright MCP
+
+本 skill 的所有浏览器操作通过 Playwright MCP 工具执行（`browser_navigate`、`browser_click`、`browser_snapshot` 等）。运行前需确保 Playwright MCP 可用：
+
+- **Claude Code**: 需安装 Playwright MCP 插件（`plugin:playwright:playwright`）。项目的 `.claude/settings.local.json` 已授权相关工具。
+- **OpenClaw**: 需安装 `playwright-mcp` skill（来自 `openclaw/skills` 官方仓库），它在 OpenClaw 中启动 Playwright MCP server，提供相同的工具接口。
+
+如果 Playwright MCP 不可用（agent 尝试调用 `browser_navigate` 等工具时报错），应提示用户安装对应的 Playwright 依赖，然后重试。
+
+### 职责划分
 
 This skill owns the decision-making layer:
 
@@ -22,11 +33,11 @@ This skill owns the decision-making layer:
 - call execution-only scripts for config validation, Hostclub password decryption, mailbox password generation, and status updates
 - report structured results with screenshots
 
-The browser automation steps (navigation, clicks, form fills) are performed by the agent directly using OpenClaw browser capabilities. The scripts in `scripts/` handle non-browser tasks: config file validation, AES password decryption, mailbox password generation, domain status updates, and profile management.
+The browser automation steps (navigation, clicks, form fills) are performed by the agent directly using **Playwright MCP tools** (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_evaluate`, `browser_run_code`, `browser_tabs`, `browser_wait_for`, etc.). The scripts in `scripts/` handle non-browser tasks: config file validation, AES password decryption, mailbox password generation, domain status updates, and profile management.
 
 For the detailed Hostclub/Titan navigation flow, read `references/hostclub-flow.md`.
 For account table and domain table schemas, read `references/config-schema.md`.
-For OpenClaw browser CLI commands and ref 歧义处理, read `references/browser-commands.md`.
+For Playwright MCP tool reference and ref 歧义处理, read `references/browser-commands.md`.
 
 ## Required Inputs
 
@@ -128,82 +139,141 @@ In production mode (when account/domain tables exist **and** the caller does not
    If the profile does not exist, create it:
 
    ```bash
-   ./scripts/manage_profile.sh --create <profile-name>
+   ./scripts/manage_profile.sh --create <profile-name> --json
    ```
+
+   Profile 目录位于 `~/.openclaw/mail/profiles/{profile-name}/`，用于存储 Playwright storageState（cookie/localStorage 持久化）。
+
+7. **加载 profile storageState（登录态恢复）**:
+
+   如果 profile 目录中存在 `storage-state.json`，通过 Playwright MCP 加载已保存的 cookie:
+
+   > **注意**: `browser_run_code` 中 `require('fs')` 不可用。需要分两步操作。
+
+   **步骤 A**: 用 bash 提取 cookie 数组:
+   ```bash
+   cat <profile-path>/storage-state.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d['cookies']))"
+   ```
+
+   **步骤 B**: 将提取的 cookie 数组传入 `browser_run_code`:
+   ```
+   工具: browser_run_code
+   code: |
+     async (page) => {
+       const cookies = <步骤A输出的cookie数组>;
+       await page.context().addCookies(cookies);
+       return { loaded: true, cookieCount: cookies.length };
+     }
+   ```
+
+   如果 storageState 文件不存在（`manage_profile.sh --check` 输出 `hasStorageState: false`），跳过此步骤（Phase 2 会处理登录）。
+
+   **浏览器安装**: 如果后续浏览器操作报错提示浏览器未安装，调用 Playwright MCP 的 `browser_install` 工具安装浏览器。
 
 ### Phase 2: Login
 
-7. Launch the browser profile and navigate to the login URL (from account table `loginUrl`, or `https://www.hostclub.org/login.php` in direct mode).
+8. Navigate to the login URL (from account table `loginUrl`, or `https://www.hostclub.org/login.php` in direct mode):
 
-8. Detect login state by checking the page content:
+   ```
+   工具: browser_navigate
+   参数: { url: "https://www.hostclub.org/login.php" }
+   ```
 
-   - If the page contains text matching the pattern `欢迎 ` (e.g., `欢迎 Yuan Jian !`，注意 `!` 前有空格), the session is active. Skip to Phase 3.
-   - If the page shows a login form (fields `txtUserName` / `txtPassword` visible), proceed with authentication.
-   - If the page shows neither (e.g., redirected to homepage with only a `登录/注册` link), navigate to `https://www.hostclub.org/login.php` first, then re-check. **最多重试 3 次**。如果 3 次后仍无法识别页面状态，返回 `failed`，error: `Unable to detect login state after 3 navigation attempts`。
+9. Detect login state by checking the page content:
+
+   ```
+   工具: browser_snapshot
+   参数: {}
+   ```
+
+   - **已登录**: snapshot 中包含 `欢迎` 文本（如 `欢迎 Yuan Jian !`，注意 `!` 前有空格）→ session 有效，跳到 Phase 3。
+   - **未登录**: snapshot 中出现 `请先登录再下单！` 标题，以及邮件地址/密码输入框和 `登录` 按钮 → 进入认证流程。（注意: Playwright snapshot 显示的是 accessibility tree，登录表单字段显示为 `textbox` 和 `textbox "密码 *"`，不会显示 HTML name 属性 `txtUserName`/`txtPassword`。）
+   - **两者都没有**（如被重定向到首页，只有 `登录/注册` 链接）→ 重新导航到 `https://www.hostclub.org/login.php`，然后再次检查。**最多重试 3 次**。如果 3 次后仍无法识别页面状态，返回 `failed`，error: `Unable to detect login state after 3 navigation attempts`。
    - Do not rely solely on cookies; always check rendered page content.
 
-9. If not logged in:
+10. If not logged in:
 
-   - **注意**: 登录页面同时包含登录表单和注册表单，两者都有 text/password 输入框。直接使用 snapshot ref 可能匹配到错误的表单。
-   - 使用 `openclaw browser evaluate --fn` 或 `openclaw browser fill --fields-file` 方式，通过字段 name 属性（`txtUserName`, `txtPassword`）精确定位登录表单字段。详见 `references/browser-commands.md` 的 "处理 Ref 歧义" 章节。
-   - **不要**通过匹配"登录"文字来寻找提交按钮——页面顶部有 `登录/注册` 导航链接，匹配文字会点到导航而非表单提交。应直接提交登录表单本身（`HTMLFormElement.prototype.submit.call(form)`）或精确定位表单内的提交按钮。
-   - Submit the login form.
-   - Wait for the page to load.
-   - **登录结果检测**: 不要仅依赖 `snapshot --labels --efficient` 判断结果（精简 snapshot 可能不包含错误横幅文本，实测已确认）。必须使用 `openclaw browser evaluate --fn "document.body.innerText"` 获取完整页面文本，然后按以下优先级检查：
-     - 包含 `欢迎` → 登录成功，继续。
-     - 包含 `无效的用户名或密码` / `invalid` / `login attempts remaining` → 密码错误，**立即停止**，返回 `failed`。不要重试（重复尝试会触发账号锁定）。
-     - 包含 `locked` / `锁定` → 账号锁定，返回 `needs_human`。
-     - 出现 CAPTCHA / 验证码 / 2FA 提示 → 返回 `needs_human`。
-   - 详见 `references/hostclub-flow.md` Step 3 "登录结果检测" 章节。
+    - **注意**: 登录页面同时包含登录表单和注册表单，两者都有 text/password 输入框。直接使用 snapshot ref 可能匹配到错误的表单。
+    - 使用 `browser_evaluate` 或 `browser_run_code`，通过字段 name 属性（`txtUserName`, `txtPassword`）精确定位登录表单字段。详见 `references/browser-commands.md` 的 "处理 Ref 歧义" 章节。
+    - **不要**通过匹配"登录"文字来寻找提交按钮——页面顶部有 `登录/注册` 导航链接，匹配文字会点到导航而非表单提交。应直接提交登录表单本身（`HTMLFormElement.prototype.submit.call(form)`）或精确定位表单内的提交按钮。
+    - Submit the login form.
+    - Wait for the page to load.
+    - **登录结果检测**: 不要仅依赖 `browser_snapshot` 判断结果（精简 snapshot 可能不包含错误横幅文本，实测已确认）。必须使用 `browser_evaluate` 执行 `() => document.body.innerText` 获取完整页面文本，然后按以下优先级检查：
+      - 包含 `欢迎` → 登录成功，继续。
+      - 包含 `无效的用户名或密码` / `invalid` / `login attempts remaining` → 密码错误，**立即停止**，返回 `failed`。不要重试（重复尝试会触发账号锁定）。
+      - 包含 `locked` / `锁定` → 账号锁定，返回 `needs_human`。
+      - 出现 CAPTCHA / 验证码 / 2FA 提示 → 返回 `needs_human`。
+    - **登录成功后保存 storageState**: 调用 `browser_run_code` 将 cookie 保存到 profile 的 `storage-state.json`，供下次会话复用。详见 `references/hostclub-flow.md` Step 3 "登录结果检测" 章节。
+    - 详见 `references/hostclub-flow.md` Step 3。
 
 ### Phase 3: Navigate to Domain
 
-10. From the Hostclub homepage (logged in),进入账号管理区域。`欢迎 <用户名> !` 文本在 `<li>` 元素内不可直接点击，其内部包含 `我的账号` 链接 (`href="javascript:void(0)"`)。必须使用 `openclaw browser evaluate --fn` 方式点击该链接。详见 `references/hostclub-flow.md` Step 4。
+11. From the Hostclub homepage (logged in),进入账号管理区域。`欢迎 <用户名> !` 文本在 `<li>` 元素内不可直接点击，其内部包含 `我的账号` 链接 (`href="javascript:void(0)"`)。必须使用 `browser_evaluate` 方式点击该链接。详见 `references/hostclub-flow.md` Step 4。
 
-11. The system redirects through SSO token (`CustomerIndexServlet?redirectpage=null&userLoginId=...`) to `cp.hostclub.org`. **SSO 跳转检测**: 等待页面加载后，用 `openclaw browser evaluate --fn "location.href"` 检查 URL。如果 URL 包含 `cp.hostclub.org` 则成功；如果仍在 `hostclub.org` 则重试点击"我的账号"（最多 2 次）；3 次尝试后仍未跳转则返回 `failed`，error: `SSO redirect to cp.hostclub.org timed out`。详见 `references/hostclub-flow.md` Step 5。
+12. The system redirects through SSO token (`CustomerIndexServlet?redirectpage=null&userLoginId=...`) to `cp.hostclub.org`. **SSO 跳转检测**: 等待页面加载后，用 `browser_evaluate` 执行 `() => location.href` 检查 URL。如果 URL 包含 `cp.hostclub.org` 则成功；如果仍在 `hostclub.org` 则重试点击"我的账号"（最多 2 次）；3 次尝试后仍未跳转则返回 `failed`，error: `SSO redirect to cp.hostclub.org timed out`。详见 `references/hostclub-flow.md` Step 5。
 
-12. On the `cp.hostclub.org` management center, locate the search field (placeholder: `输入域名或订单号`), enter the target domain, and navigate to the domain's order detail page. 在域名详情页上，还有一个 `跳转到域名` 搜索字段可用于域名间跳转。**注意**: 搜索可能返回多条订单（如域名管理 + Titan Email 分开列出）。优先点击包含 `Titan Email` 关键词的订单行；如果没有明确标识，点击第一条结果进入后检查是否有 Titan 区块；详见 `references/hostclub-flow.md` Step 6。
+13. On the `cp.hostclub.org` management center, locate the search field (placeholder: `输入域名或订单号`), enter the target domain using `browser_type`, and navigate to the domain's order detail page. 在域名详情页上，还有一个 `跳转到域名` 搜索字段可用于域名间跳转。**注意**: 搜索可能返回多条订单（如域名管理 + Titan Email 分开列出）。优先点击包含 `Titan Email` 关键词的订单行；如果没有明确标识，点击第一条结果进入后检查是否有 Titan 区块；详见 `references/hostclub-flow.md` Step 6。
 
-13. If the domain is not found in the account, stop and return a `failed` result with an appropriate error message.
+14. If the domain is not found in the account, stop and return a `failed` result with an appropriate error message.
 
 ### Phase 4: Check Email Status
 
-14. On the domain order detail page, locate the `Titan Email (Global)` section.
+15. On the domain order detail page, take a `browser_snapshot` and locate the `Titan Email (Global)` section.
 
-15. Determine the current email status:
+16. Determine the current email status:
 
     - **Not enabled**: no Titan Email section, or a `Start Free Trial Now` button is visible.
     - **Enabled (trial active)**: `Business (Free Trial)` label is visible, along with `TOTAL EMAIL ACCOUNTS X/Y`.
     - **Quota reached**: `TOTAL EMAIL ACCOUNTS` shows `X/Y` where X equals Y (e.g., `1/1`, `2/2`). Parse both numbers; quota is reached when `used >= total`.
 
-16. **Query mode**: if `mailboxName` is not provided, collect the status information from this page (emailEnabled, trialStarted, quota) and skip to Phase 6 to return the result with status `query_ok`. Do not click any buttons or navigate further. If the Titan section shows existing mailbox info, include it in `existingMailboxes`.
+17. **Query mode**: if `mailboxName` is not provided, collect the status information from this page (emailEnabled, trialStarted, quota) and skip to Phase 6 to return the result with status `query_ok`. Do not click any buttons or navigate further. If the Titan section shows existing mailbox info, include it in `existingMailboxes`.
 
-17. **Create mode**: based on status:
+18. **Create mode**: based on status:
 
-    - If not enabled: click `Start Free Trial Now`, wait for activation（最多 30 秒，每 10 秒 snapshot 检查 `Business (Free Trial)` 和 `Go to Admin Panel` 是否出现）。超时则返回 `failed`，error: `Free trial activation timed out`。激活成功后继续进入 Titan 面板。When creation succeeds in this path, use status `trial_started` (not `created`) to distinguish first-time activation from subsequent creations.
-    - If enabled and quota not reached (used < total): 点击 `Go to Admin Panel` 按钮进入 Titan 管理面板（`manage.titan.email`）。该按钮位于 `MANAGE EMAIL ACCOUNTS` 区块内，是 `<span class="wp-btn-blue-hollow">` 元素，`cursor: pointer`，**可点击**。它在 closed shadow DOM 内，常规 `document.querySelector` 无法找到，必须通过 Playwright 的 `getByText('Go to Admin Panel')` 或 OpenClaw snapshot ref 来定位。**注意**: `Login to Webmail` 链接指向 `mailhostbox.titan.email`（终端用户邮箱登录页），**不要**用它来进入管理面板。
+    - If not enabled: click `Start Free Trial Now` to activate the free trial, then **MUST execute the polling loop below to wait for activation to complete — 绝对不要点击后直接进入下一步**。
+
+      **⚠️ 激活等待轮询（必须执行）**: 免费试用激活是异步操作，服务端需要时间处理。点击 `Start Free Trial Now` 后页面会显示 `Activating free trial ...` 文本和提示 `Your Order will be processed by our automatic provisioning system in the next 5-10 minutes`。**实测激活通常在 15-30 秒内完成，页面会自动刷新显示激活后的 Titan 区块**。
+
+      1. 用 `browser_click` 点击 `Start Free Trial Now`
+      2. 等待 3 秒后用 `browser_snapshot` 首次检查，确认点击生效（按钮变为 disabled 或出现 `Activating free trial ...` 文本）
+      3. 进入轮询循环，每轮:
+         a. 等待 10 秒: `browser_wait_for` (time: 10)
+         b. 取 `browser_snapshot` 检查页面
+         c. 检查激活成功标志: `Business (Free Trial)` 文本 **和** `Go to Admin Panel` 按钮 **和** `TOTAL EMAIL ACCOUNTS` 同时出现
+         d. 如果标志出现 → **激活成功，立即退出轮询，继续下一步**
+         e. 如果页面显示 `Activating free trial ...` 或按钮为 disabled → 激活进行中，继续等待
+         f. 如果连续 4 轮无变化且没有上述进行中标志，刷新页面: `browser_evaluate` 执行 `() => { location.reload() }`
+      4. **最多 12 轮**（约 120 秒）。12 轮后仍未激活则返回 `failed`，error: `Free trial activation timed out`
+
+      **⚠️ 关键**: 一旦 snapshot 中出现 `Business (Free Trial)` 和 `Go to Admin Panel`，**必须立即认定激活成功并退出轮询**，不要继续等待。
+
+      激活成功后，继续下方的 `Go to Admin Panel` 流程进入 Titan 面板。When creation succeeds in this path, use status `trial_started` (not `created`) to distinguish first-time activation from subsequent creations.
+
+      详见 `references/hostclub-flow.md` Step 7 State A 的完整轮询流程。
+
+    - If enabled and quota not reached (used < total): 用 `browser_click` 点击 `Go to Admin Panel` 按钮进入 Titan 管理面板（`manage.titan.email`）。该按钮位于 `MANAGE EMAIL ACCOUNTS` 区块内，在 closed shadow DOM 内渲染，但 **Playwright snapshot 可以直接获取其 ref 并点击**，无需特殊处理。**注意**: `Login to Webmail` 链接指向 `mailhostbox.titan.email`（终端用户邮箱登录页），**不要**用它来进入管理面板。
     - If quota reached: still click `Go to Admin Panel` to enter the Titan admin panel and check the existing mailbox list. If `mailboxName@domain` is already in the list, return `already_exists`. If the target mailbox is not in the list, return `quota_reached`.
 
     **⚠️ 标签页切换**: `Go to Admin Panel` 会在新标签页打开 Titan 管理面板（URL: `manage.titan.email/partner/autoLogin?partnerId=...&jwt=...`，通过 JWT 自动认证，无需单独登录）。点击后必须执行以下步骤才能操作 Titan 页面：
-    1. `openclaw browser tabs` — 获取标签页列表
-    2. `openclaw browser focus <titan-tab-targetId>` — 切换到 Titan 标签页
-    3. 在 Titan 标签页上执行 snapshot
+    1. `browser_tabs` (action: "list") — 获取标签页列表
+    2. `browser_tabs` (action: "select", index: 1) — 切换到 Titan 标签页（通常是 index 1）
+    3. 在 Titan 标签页上执行 `browser_snapshot`
     详见 `references/hostclub-flow.md` Step 8 和 `references/browser-commands.md` "标签页管理工作流" 章节。
 
 ### Phase 5: Idempotency Check and Mailbox Creation (Create Mode Only)
 
 > This phase is skipped entirely in query mode.
 
-18. Verify Titan panel access. **前提**: 已通过 Step 17 切换到 Titan 标签页。`Go to Admin Panel` 通过 JWT 自动认证，正常情况下会直接进入 `manage.titan.email/email-accounts` 管理面板。用 `openclaw browser evaluate --fn "location.href"` 确认 URL，详见 `references/hostclub-flow.md` Step 9。
+19. Verify Titan panel access. **前提**: 已通过 Step 18 切换到 Titan 标签页。`Go to Admin Panel` 通过 JWT 自动认证，正常情况下会直接进入 `manage.titan.email/email-accounts` 管理面板。用 `browser_evaluate` 执行 `() => location.href` 确认 URL，详见 `references/hostclub-flow.md` Step 9。
 
-    - **管理面板可达**: URL 包含 `manage.titan.email` 且显示邮箱列表页面 → 设 `adminPanelAccessible=true`，继续步骤 19。
+    - **管理面板可达**: URL 包含 `manage.titan.email` 且显示邮箱列表页面 → 设 `adminPanelAccessible=true`，继续步骤 20。
     - **管理面板不可达（JWT 过期或异常）**: 设 `adminPanelAccessible=false`。此时无法枚举已有邮箱，依据 Phase 4 获取的配额判断：配额已满（used >= total）返回 `quota_reached`，配额未满可尝试创建但无法做精确幂等性检查。
 
-19. In the Titan admin panel, check the existing mailbox list (仅当 `adminPanelAccessible=true`).
+20. In the Titan admin panel, check the existing mailbox list (仅当 `adminPanelAccessible=true`).
 
-20. **Idempotency**: if `mailboxName@domain` already appears in the list, do not create it again. Return `already_exists` with `success: true`.
+21. **Idempotency**: if `mailboxName@domain` already appears in the list, do not create it again. Return `already_exists` with `success: true`.
 
-21. If the target mailbox does not exist and quota allows (used < total):
+22. If the target mailbox does not exist and quota allows (used < total):
 
     - Generate a mailbox password before opening or submitting the creation form:
 
@@ -217,19 +287,19 @@ In production mode (when account/domain tables exist **and** the caller does not
       - avoid whitespace
       - do not log it, print it to commentary, or persist it in `domains.json`
 
-    - Click the create new mailbox button (`新建邮箱帐户`).
-    - Fill in the mailbox creation form with `mailboxName`, the generated password, and any required fields.
+    - Click the create new mailbox button (`新建邮箱帐户`) using `browser_click`.
+    - Fill in the mailbox creation form with `mailboxName`, the generated password, and any required fields. Use `browser_fill_form` or `browser_type`.
       - **邮箱** 输入框 (placeholder: "e.g John"): 填入 `mailboxName`。域名后缀 `@domain` 会自动显示。
       - **密码** 输入框 (placeholder: "最少8个字符。"): 填入生成的密码。
       - **密码恢复邮箱地址** (可选): 可留空。
-    - Submit the form by clicking `创建新帐户` button.
-    - Wait for confirmation dialog showing `创建成功！`。
+    - Submit the form by clicking `创建新帐户` button using `browser_click`.
+    - Wait for confirmation dialog showing `创建成功！`: `browser_wait_for` (text: "创建成功")。
 
-22. If the creation form shows an upgrade prompt instead of a usable form, the quota is actually reached. Return `quota_reached`.
+23. If the creation form shows an upgrade prompt instead of a usable form, the quota is actually reached. Return `quota_reached`.
 
 ### Phase 6: Result Reporting
 
-23. If in config mode, update the domain table:
+24. If in config mode, update the domain table:
 
     ```bash
     ./scripts/update_domain_status.sh \
@@ -241,9 +311,9 @@ In production mode (when account/domain tables exist **and** the caller does not
 
     The script appends the mailbox address to the `mailboxes` array in the domain table (deduplicating). It also records `lastMailboxCreatedAt` (ISO 8601 timestamp) for successful creations.
 
-24. Return the structured result (see Output Structure below).
+25. Return the structured result (see Output Structure below).
 
-25. **Tab cleanup**: 如果在 Phase 4/5 中打开了 Titan 标签页，关闭它并确认回到 Hostclub 标签页（或原始标签页）。在 batch 模式下这是切换到下一个域名的前提。详见 `references/hostclub-flow.md` Step 14。
+26. **Tab cleanup**: 如果在 Phase 4/5 中打开了 Titan 标签页，关闭它: `browser_tabs` (action: "close", index: 1)。确认回到 Hostclub 标签页（index 0）。在 batch 模式下这是切换到下一个域名的前提。详见 `references/hostclub-flow.md` Step 14。
 
 ## Error Handling
 
@@ -351,11 +421,11 @@ Every execution must return this JSON structure:
 - `emailEnabled`: set to `true` if the domain order page shows a `Titan Email (Global)` section with `Business (Free Trial)` or any active status. `false` if no Titan section or only a `Start Free Trial Now` button.
 - `trialStarted`: `true` if the free trial has been activated (either previously or during this execution). `false` only if the domain has never had Titan Email enabled.
 - `mailboxPassword`: the generated password used for creation. Set it only when a new mailbox was actually created (`status=created` or `status=trial_started`). For `query_ok`, `already_exists`, `quota_reached`, `failed`, and `needs_human`, set it to `null`.
-- `adminPanelAccessible`: `true` if the skill successfully navigated to `mailhostbox.titan.email`. `false` if the panel was unreachable (SSO failure, timeout, etc.). In query mode, this is always `false` because the skill does not navigate to the Titan panel.
+- `adminPanelAccessible`: `true` if the skill successfully navigated to `manage.titan.email`. `false` if the panel was unreachable (SSO failure, timeout, etc.). In query mode, this is always `false` because the skill does not navigate to the Titan panel.
 - `mailboxQuota`: an object `{"used": X, "total": Y}` parsed from the `TOTAL EMAIL ACCOUNTS X/Y` text on the domain order page. Both values are integers. If the Titan section is not visible, set to `null`. The free trial quota varies (currently 2 accounts for new trials, some legacy domains may still show 1).
 - `mailboxQuotaReached`: `true` if `mailboxQuota.used >= mailboxQuota.total`. `false` otherwise. In query mode, this is inferred from the domain order page text if visible.
 - `canCreateAnotherMailbox`: `true` only when all three conditions are met: `emailEnabled=true`, `adminPanelAccessible=true`, and `mailboxQuotaReached=false`. If any condition fails, this is `false` — even when quota is not reached, an unreachable admin panel means creation is impossible. In query mode, since `adminPanelAccessible` is always `false`, this field is always `false` — the caller should rely on `emailEnabled` and `mailboxQuotaReached` to infer availability.
-- `status` distinction: use `query_ok` in query mode. Use `trial_started` when the free trial was activated during this execution (Phase 4 step 17, "not enabled" branch). Use `created` when the trial was already active and the mailbox was created normally.
+- `status` distinction: use `query_ok` in query mode. Use `trial_started` when the free trial was activated during this execution (Phase 4 step 18, "not enabled" branch). Use `created` when the trial was already active and the mailbox was created normally.
 
 ## Batch Dispatching (Caller's Responsibility)
 
@@ -413,8 +483,8 @@ Single-domain failures do not block subsequent domains — the caller skips the 
 
 ## Concurrency Rules
 
-- Same account (same profile): tasks must run serially. The browser process and data directory cannot be shared across concurrent invocations.
-- Different accounts: tasks can run in parallel (separate profiles and data directories).
+- Same account (same profile): tasks must run serially. The browser session cannot be shared across concurrent invocations.
+- Different accounts: tasks can run in parallel (separate browser sessions).
 - The skill handles one domain per invocation. Batch processing is the caller's responsibility.
 
 Production environments should implement a profile-level lock to enforce serial execution:
@@ -428,7 +498,7 @@ Production environments should implement a profile-level lock to enforce serial 
 - **Password encryption**: passwords are stored as AES-256-CBC encrypted Base64 strings in the `passwordEncrypted` field. The encryption key comes from the `OPENCLAW_SECRET_KEY` environment variable — it must never appear in config files, code, or logs.
 - **Password handling**: decrypted Hostclub passwords must be used immediately and discarded. Generated mailbox passwords must be returned once in structured output, then treated as caller-managed secrets. Never cache them in local files, log them, or include them in screenshots.
 - **禁止对明文密码解密**: 调用方提供的 `password` 字段是明文，绝对不要传给 `decrypt_password.sh`。只有从 `accounts.json` 的 `passwordEncrypted` 字段读取的值才需要解密。对明文运行 AES 解密会产生乱码，导致登录失败（账号密码不匹配）。
-- **Profile data isolation**: browser profile data directories must be readable only by the OpenClaw runtime user (`chmod 700`). Other users must not have read access.
+- **Profile data isolation**: profile 目录（`~/.openclaw/mail/profiles/{name}/`）权限设为 `chmod 700`，仅当前用户可读写。storageState 文件包含 cookie 等敏感信息。
 - Do not silently overwrite existing browser profiles.
 - Do not attempt to create a mailbox if quota is reached — check first.
 - If login state detection is ambiguous, re-authenticate rather than proceeding with a potentially invalid session.
@@ -439,19 +509,19 @@ Production environments should implement a profile-level lock to enforce serial 
 
 ### 核心规则
 
-1. **点击 `Go to Admin Panel` 后立即切换标签页**: `openclaw browser tabs` → `openclaw browser focus <titan-tab>`
-2. **操作完 Titan 面板后关闭该标签页**: `openclaw browser close <titan-tab>`（batch 模式下必需，防止标签堆积）
+1. **点击 `Go to Admin Panel` 后立即切换标签页**: `browser_tabs` (list) → `browser_tabs` (select, index: 1)
+2. **操作完 Titan 面板后关闭该标签页**: `browser_tabs` (close, index: 1)（batch 模式下必需，防止标签堆积）
 3. **每次 snapshot/click/type 前确认在正确的标签页**: 错误的标签页会导致元素不匹配
-4. **记录 Hostclub 标签页的 targetId**: 在 Step 17 点击 `Go to Admin Panel` 之前记录，方便后续切回
+4. **Hostclub 标签页始终是 index 0**: Titan 关闭后自动回到 index 0
 
 ### 标签页生命周期
 
 ```
-Phase 1–3: [Hostclub 标签页] (唯一)
-Phase 4 Step 17: [Hostclub] → 点击 Go to Admin Panel → [Hostclub, Titan(新)]
-                  → tabs → focus Titan
-Phase 5: [Hostclub, Titan(活跃)] — 操作 Titan 面板
-Phase 6 Step 25: close Titan → [Hostclub(活跃)]
+Phase 1–3: [Hostclub 标签页 (index 0)] (唯一)
+Phase 4 Step 18: [Hostclub(0)] → 点击 Go to Admin Panel → [Hostclub(0), Titan(1)]
+                  → browser_tabs(select, 1)
+Phase 5: [Hostclub(0), Titan(1, 活跃)] — 操作 Titan 面板
+Phase 6 Step 26: browser_tabs(close, 1) → [Hostclub(0, 活跃)]
 Batch 切换: 回到 Hostclub 搜索下一个域名
 ```
 
@@ -497,15 +567,16 @@ Phase 名称: `preflight` / `login` / `navigate` / `email-status` / `create` / `
 | Phase | Step | 事件 |
 |-------|------|------|
 | preflight | 2 | 凭证模式确定（direct/config） |
-| login | 8 | 登录态检测结果 |
-| login | 9 | 登录成功/失败 |
-| navigate | 11 | SSO 跳转结果 |
-| navigate | 12 | 域名搜索结果 |
-| email-status | 15 | Email 状态判定 |
-| email-status | 17 | 标签切换到 Titan |
-| create | 18 | Titan 面板访问结果 |
-| create | 21 | 邮箱创建结果 |
-| result | 24 | 最终结果 |
+| preflight | 7 | storageState 加载结果 |
+| login | 9 | 登录态检测结果 |
+| login | 10 | 登录成功/失败 |
+| navigate | 12 | SSO 跳转结果 |
+| navigate | 13 | 域名搜索结果 |
+| email-status | 16 | Email 状态判定 |
+| email-status | 18 | 激活等待/标签切换到 Titan |
+| create | 19 | Titan 面板访问结果 |
+| create | 22 | 邮箱创建结果 |
+| result | 25 | 最终结果 |
 
 ### 脚本自动记录
 
@@ -527,6 +598,7 @@ Recommended format: `{provider}-{sequence}`
 - `sequence`: three-digit number starting from `001` (e.g., `001`, `002`)
 - Same-platform multiple accounts are distinguished by sequence number
 - The `browserProfile` field in the account table must match this convention
+- 每个 profile 对应 `~/.openclaw/mail/profiles/{name}/` 目录，其中 `storage-state.json` 保存 Playwright cookie/localStorage
 
 Examples: `hostclub-001`, `hostclub-002`, `namesilo-001`
 
@@ -539,12 +611,12 @@ Examples: `hostclub-001`, `hostclub-002`, `namesilo-001`
 - `scripts/check_config.sh`: validate account table and domain table exist and are well-formed
 - `scripts/decrypt_password.sh`: decrypt AES-256-CBC encrypted password using `OPENCLAW_SECRET_KEY`
 - `scripts/generate_mailbox_password.sh`: generate a strong mailbox password for newly created Titan accounts
-- `scripts/manage_profile.sh`: check, create, or list OpenClaw browser profiles
+- `scripts/manage_profile.sh`: check, create, or list browser profiles (Playwright storageState directories)
 - `scripts/update_domain_status.sh`: update domain table after mailbox creation with result status
 
 ### references/
 
-- `references/hostclub-flow.md`: step-by-step Hostclub/Titan navigation flow with element selectors
-- `references/browser-commands.md`: OpenClaw browser CLI 命令速查和 ref 歧义处理指南
+- `references/hostclub-flow.md`: step-by-step Hostclub/Titan navigation flow with Playwright MCP tool calls
+- `references/browser-commands.md`: Playwright MCP 工具速查和 ref 歧义处理指南
 - `references/config-schema.md`: account table and domain table JSON schemas with examples
 - `references/logging.md`: 日志系统使用指南、格式定义和排查示例

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# manage_profile.sh — Check, create, or list OpenClaw browser profiles.
+# manage_profile.sh — Check, create, or list browser profiles (storageState directories).
+#
+# Profiles are stored as directories under ~/.openclaw/mail/profiles/{name}/.
+# Each profile directory may contain a storage-state.json file with Playwright
+# storageState data (cookies, localStorage) for session persistence.
 #
 # Usage:
 #   ./scripts/manage_profile.sh --check <profile-name> [--json]
@@ -16,7 +20,6 @@
 #   1  usage error or invalid profile name
 #   2  profile not found (for --check)
 #   3  profile creation failed
-#   4  openclaw CLI not available
 
 set -euo pipefail
 
@@ -25,6 +28,7 @@ if [[ -f "$SCRIPT_DIR/log.sh" ]]; then
   source "$SCRIPT_DIR/log.sh"
 fi
 
+PROFILES_DIR="${OPENCLAW_MAIL_PROFILES_DIR:-$HOME/.openclaw/mail/profiles}"
 ACTION=""
 PROFILE_NAME=""
 JSON_OUTPUT=false
@@ -61,31 +65,27 @@ validate_name() {
   fi
 }
 
-# Check openclaw CLI availability
-if ! command -v openclaw &>/dev/null; then
-  if $JSON_OUTPUT; then
-    echo '{"success": false, "error": "openclaw CLI not found in PATH"}'
-  else
-    echo "Error: openclaw CLI not found in PATH" >&2
-  fi
-  exit 4
-fi
-
 case "$ACTION" in
   check)
     validate_name "$PROFILE_NAME"
-    if openclaw browser profiles 2>/dev/null | grep -q "^${PROFILE_NAME}\(:\|$\)"; then
-      [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile exists: $PROFILE_NAME"
+    PROFILE_PATH="$PROFILES_DIR/$PROFILE_NAME"
+    STATE_FILE="$PROFILE_PATH/storage-state.json"
+
+    if [[ -d "$PROFILE_PATH" ]]; then
+      has_state=false
+      [[ -f "$STATE_FILE" ]] && has_state=true
+
+      [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile exists: $PROFILE_NAME" "{\"hasStorageState\":$has_state}"
       if $JSON_OUTPUT; then
-        echo "{\"success\": true, \"exists\": true, \"profileName\": \"$PROFILE_NAME\"}"
+        echo "{\"success\": true, \"exists\": true, \"profileName\": \"$PROFILE_NAME\", \"profilePath\": \"$PROFILE_PATH\", \"hasStorageState\": $has_state}"
       else
-        echo "Profile '$PROFILE_NAME' exists."
+        echo "Profile '$PROFILE_NAME' exists (storageState: $has_state)."
       fi
       exit 0
     else
       [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile not found: $PROFILE_NAME"
       if $JSON_OUTPUT; then
-        echo "{\"success\": true, \"exists\": false, \"profileName\": \"$PROFILE_NAME\"}"
+        echo "{\"success\": true, \"exists\": false, \"profileName\": \"$PROFILE_NAME\", \"profilePath\": \"$PROFILE_PATH\", \"hasStorageState\": false}"
       else
         echo "Profile '$PROFILE_NAME' not found."
       fi
@@ -95,56 +95,67 @@ case "$ACTION" in
 
   create)
     validate_name "$PROFILE_NAME"
-    _try_create() {
-      openclaw browser create-profile --name "$PROFILE_NAME" 2>&1
-    }
-    if $JSON_OUTPUT; then
-      if cli_output=$(_try_create); then
-        [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile created: $PROFILE_NAME"
-        echo "{\"success\": true, \"created\": true, \"profileName\": \"$PROFILE_NAME\"}"
-        exit 0
+    PROFILE_PATH="$PROFILES_DIR/$PROFILE_NAME"
+
+    if [[ -d "$PROFILE_PATH" ]]; then
+      [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile already exists: $PROFILE_NAME"
+      if $JSON_OUTPUT; then
+        echo "{\"success\": true, \"created\": false, \"profileName\": \"$PROFILE_NAME\", \"profilePath\": \"$PROFILE_PATH\", \"message\": \"Profile already exists\"}"
       else
-        # Retry once after short delay (race condition after delete)
-        [[ "$(type -t log_warn 2>/dev/null)" == "function" ]] && log_warn "preflight" 6 "Profile creation failed, retrying after 2s" "{\"profile\":\"$PROFILE_NAME\"}"
-        sleep 2
-        if cli_output=$(_try_create); then
-          [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile created on retry: $PROFILE_NAME"
-          echo "{\"success\": true, \"created\": true, \"profileName\": \"$PROFILE_NAME\", \"retried\": true}"
-          exit 0
-        else
-          [[ "$(type -t log_error 2>/dev/null)" == "function" ]] && log_error "preflight" 6 "Profile creation failed after retry" "{\"profile\":\"$PROFILE_NAME\"}"
-          echo "{\"success\": false, \"error\": \"Failed to create profile '$PROFILE_NAME' (retried once)\"}"
-          exit 3
-        fi
+        echo "Profile '$PROFILE_NAME' already exists."
       fi
+      exit 0
+    fi
+
+    if mkdir -p "$PROFILE_PATH" 2>/dev/null; then
+      chmod 700 "$PROFILE_PATH"
+      [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile created: $PROFILE_NAME"
+      if $JSON_OUTPUT; then
+        echo "{\"success\": true, \"created\": true, \"profileName\": \"$PROFILE_NAME\", \"profilePath\": \"$PROFILE_PATH\"}"
+      else
+        echo "Profile '$PROFILE_NAME' created at $PROFILE_PATH"
+      fi
+      exit 0
     else
-      if _try_create; then
-        [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile created: $PROFILE_NAME"
-        echo "Profile '$PROFILE_NAME' created."
-        exit 0
+      [[ "$(type -t log_error 2>/dev/null)" == "function" ]] && log_error "preflight" 6 "Profile creation failed" "{\"profile\":\"$PROFILE_NAME\"}"
+      if $JSON_OUTPUT; then
+        echo "{\"success\": false, \"error\": \"Failed to create profile directory '$PROFILE_PATH'\"}"
       else
-        [[ "$(type -t log_warn 2>/dev/null)" == "function" ]] && log_warn "preflight" 6 "Profile creation failed, retrying after 2s" "{\"profile\":\"$PROFILE_NAME\"}"
-        sleep 2
-        if _try_create; then
-          [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile created on retry: $PROFILE_NAME"
-          echo "Profile '$PROFILE_NAME' created (retried)."
-          exit 0
-        else
-          [[ "$(type -t log_error 2>/dev/null)" == "function" ]] && log_error "preflight" 6 "Profile creation failed after retry" "{\"profile\":\"$PROFILE_NAME\"}"
-          echo "Error: Failed to create profile '$PROFILE_NAME' (retried once)" >&2
-          exit 3
-        fi
+        echo "Error: Failed to create profile directory '$PROFILE_PATH'" >&2
       fi
+      exit 3
     fi
     ;;
 
   list)
-    profiles=$(openclaw browser profiles 2>/dev/null || true)
+    if [[ ! -d "$PROFILES_DIR" ]]; then
+      if $JSON_OUTPUT; then
+        echo '{"success": true, "profiles": []}'
+      else
+        echo "No profiles directory found."
+      fi
+      exit 0
+    fi
+
+    profiles=()
+    for dir in "$PROFILES_DIR"/*/; do
+      [[ -d "$dir" ]] || continue
+      name="$(basename "$dir")"
+      profiles+=("$name")
+    done
+
     if $JSON_OUTPUT; then
-      # Extract profile names only — output lines are "name: status (info)" or just "name"
-      echo "$profiles" | sed -n 's/^\([a-z0-9][a-z0-9-]*\).*/\1/p' | jq -R -s 'split("\n") | map(select(. != "")) | {success: true, profiles: .}'
+      printf '%s\n' "${profiles[@]}" | jq -R -s 'split("\n") | map(select(. != "")) | {success: true, profiles: .}'
     else
-      echo "$profiles"
+      if [[ ${#profiles[@]} -eq 0 ]]; then
+        echo "No profiles found."
+      else
+        for p in "${profiles[@]}"; do
+          has_state="no"
+          [[ -f "$PROFILES_DIR/$p/storage-state.json" ]] && has_state="yes"
+          echo "$p (storageState: $has_state)"
+        done
+      fi
     fi
     exit 0
     ;;

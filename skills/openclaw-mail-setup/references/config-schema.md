@@ -33,7 +33,7 @@ Override with the `OPENCLAW_MAIL_CONFIG_DIR` environment variable.
 | `loginUrl` | string | yes | Login page URL |
 | `username` | string | yes | Login username/email |
 | `passwordEncrypted` | string | yes | AES-256-CBC encrypted password, Base64 encoded |
-| `browserProfile` | string | yes | OpenClaw browser profile name (lowercase, digits, hyphens) |
+| `browserProfile` | string | yes | Browser profile name, 对应 `~/.openclaw/mail/profiles/{name}/` 目录，用于 Playwright storageState 持久化 (lowercase, digits, hyphens) |
 
 ### Account ID Format
 
