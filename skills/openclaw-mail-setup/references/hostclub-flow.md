@@ -299,7 +299,6 @@ Three possible states:
 #   ✓ `Business (Free Trial)` 文本
 #   ✓ `TOTAL EMAIL ACCOUNTS` 文本
 #   ✓ `Go to Admin Panel` 按钮
-#   （注意: 忽略 `Login to Webmail` — 它不是操作目标，禁止点击）
 
 # 步骤 6: 判断结果
 #   - 标志全部出现 → ⚠️ 激活成功！立即退出轮询，继续 Step 8
@@ -335,8 +334,7 @@ Three possible states:
 页面元素:
 - `Business (Free Trial)` 按钮（可点击）
 - `TOTAL EMAIL ACCOUNTS X/Y` 纯文本
-- `Go to Admin Panel` 按钮（`<span class="wp-btn-blue-hollow">`，可点击）
-- `Login to Webmail` 链接 — **🚫 禁止点击**，指向终端用户邮箱登录页 `mailhostbox.titan.email`，无法创建或管理邮箱
+- `Go to Admin Panel` 按钮（`<span class="wp-btn-blue-hollow">`，可点击）— 进入 Titan 管理面板的入口
 - `X/Y Account(s)` 按钮（显示当前配额，可点击）
 - `buy more` 按钮
 - `Delete Accounts` 按钮
@@ -355,8 +353,6 @@ Three possible states:
 **⚠️ 重要: `Go to Admin Panel` 会在新标签页打开。必须切换标签页才能操作 Titan 面板。**
 
 **Playwright 可以直接操作 shadow DOM 内的按钮**: 取 snapshot 后找到 `Go to Admin Panel` 的 ref，直接 `browser_click` 即可。
-
-> **🚫 禁止点击 `Login to Webmail`**: snapshot 中会同时出现 `Go to Admin Panel` 和 `Login to Webmail` 两个元素。**只点击 `Go to Admin Panel`**。`Login to Webmail` 指向终端用户登录页，无法创建邮箱。
 
 ```
 # 1. 记录当前标签页列表（Hostclub 标签页通常是 index 0）
@@ -385,14 +381,9 @@ Three possible states:
 参数: { action: "select", index: 1 }
 ```
 
-**不要**使用 `Login to Webmail` 链接进入管理面板 — 它指向 `mailhostbox.titan.email`（终端用户邮箱登录页），不是管理面板。
+### Titan 管理面板入口
 
-### 两个入口的区别
-
-| 入口 | HTML 元素 | 目标 URL | 用途 |
-|------|----------|----------|------|
-| `Go to Admin Panel` | `<span class="wp-btn-blue-hollow">` | `manage.titan.email/partner/autoLogin?...jwt=...` | **管理面板**（JWT 自动认证，可创建/管理邮箱） |
-| `Login to Webmail` | `<a target="_blank" href="https://mailhostbox.titan.email">` | `mailhostbox.titan.email` | **终端用户邮箱登录页**（需要邮箱密码登录） |
+进入 Titan 管理面板的入口是 `Go to Admin Panel` 按钮，目标 URL: `manage.titan.email/partner/autoLogin?...jwt=...`（JWT 自动认证，可创建/管理邮箱）。
 
 ## Titan Admin Panel
 
