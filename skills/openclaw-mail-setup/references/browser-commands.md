@@ -146,6 +146,41 @@ openclaw browser focus <targetId> --browser-profile <profile>
 openclaw browser close <targetId> --browser-profile <profile>
 ```
 
+### 标签页管理工作流
+
+`Login to Webmail` 链接会在新标签页打开 Titan Email 面板。必须主动切换标签页才能操作新页面。
+
+**进入 Titan 面板**:
+
+```bash
+# 1. 记录当前标签页（Hostclub 域名详情页）
+openclaw browser tabs --browser-profile <profile>
+# 输出示例:
+#   [0] (active) https://cp.hostclub.org/servlet/ViewDomainServlet?...  targetId=ABC111
+#   [1] https://mailhostbox.titan.email/...  targetId=DEF222
+
+# 2. 切换到 Titan 标签页
+openclaw browser focus DEF222 --browser-profile <profile>
+
+# 3. 在 Titan 标签页上操作
+openclaw browser snapshot --browser-profile <profile> --labels --efficient
+```
+
+**返回 Hostclub 页面**:
+
+```bash
+# 切回 Hostclub 标签页
+openclaw browser focus ABC111 --browser-profile <profile>
+```
+
+**批量域名切换时清理旧标签**:
+
+```bash
+# 处理完当前域名后，关闭 Titan 标签页再切换到下一个域名
+openclaw browser close DEF222 --browser-profile <profile>
+# 此时自动回到 Hostclub 标签页
+```
+
 ## Profile 管理
 
 ### profiles — 列出所有浏览器 profile
@@ -188,4 +223,39 @@ openclaw browser click <含"登录"文字的ref> --browser-profile hostclub-001
 
 # ✅ 正确: 提交登录表单本身，或精确定位表单内的提交按钮
 openclaw browser evaluate --fn "HTMLFormElement.prototype.submit.call(document.querySelector('input[name=txtUserName]').form)" --browser-profile hostclub-001
+```
+
+## 已知限制
+
+### `wait --url` 不可用
+
+当前 OpenClaw 版本下 `openclaw browser wait --url "..."` 会报错：
+
+```
+gateway url override requires explicit credentials
+```
+
+**替代方案**:
+
+```bash
+# 方式 1: 用 evaluate 检查当前 URL
+openclaw browser evaluate --fn "location.href" --browser-profile <profile>
+
+# 方式 2: 用 wait --text 等待页面特定文本出现
+openclaw browser wait --text "欢迎" --browser-profile <profile>
+
+# 方式 3: 用 wait --time 等待固定时间
+openclaw browser wait --time 5000 --browser-profile <profile>
+```
+
+### `snapshot --labels --efficient` 可能不包含错误横幅
+
+精简模式的 snapshot 可能遗漏非交互式文本（如登录失败错误提示）。需要检测错误文本时，优先使用：
+
+```bash
+# 方式 1: 获取完整页面文本
+openclaw browser evaluate --fn "document.body.innerText" --browser-profile <profile>
+
+# 方式 2: 使用 aria 格式的完整 snapshot
+openclaw browser snapshot --browser-profile <profile> --format aria
 ```

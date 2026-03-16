@@ -19,6 +19,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/log.sh" ]]; then
+  source "$SCRIPT_DIR/log.sh"
+fi
+
 CONFIG_DIR="${OPENCLAW_MAIL_CONFIG_DIR:-$HOME/.openclaw/mail}"
 ACCOUNTS_FILE="$CONFIG_DIR/accounts.json"
 DOMAINS_FILE="$CONFIG_DIR/domains.json"
@@ -64,6 +69,7 @@ if [[ ! -f "$ACCOUNTS_FILE" ]] || [[ ! -f "$DOMAINS_FILE" ]]; then
   domains_exist="false"
   [[ -f "$ACCOUNTS_FILE" ]] && accounts_exist="true"
   [[ -f "$DOMAINS_FILE" ]] && domains_exist="true"
+  [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 2 "Config files not found, using direct mode" "{\"accountsExists\":$accounts_exist,\"domainsExists\":$domains_exist}"
   output_result "not_found" "Config files not found. Use direct mode with explicit credentials." "$accounts_exist" "$domains_exist"
   exit 2
 fi
@@ -111,5 +117,6 @@ if [[ "$domain_count" -gt 0 ]]; then
   fi
 fi
 
+[[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 2 "Config files valid" "{\"accounts\":$account_count,\"domains\":$domain_count}"
 output_result "valid" "Config files are valid" "true" "true"
 exit 0

@@ -18,6 +18,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/log.sh" ]]; then
+  source "$SCRIPT_DIR/log.sh"
+fi
+
 CONFIG_DIR="${OPENCLAW_MAIL_CONFIG_DIR:-$HOME/.openclaw/mail}"
 ACCOUNTS_FILE="$CONFIG_DIR/accounts.json"
 ACCOUNT_ID=""
@@ -41,6 +46,7 @@ if [[ -z "$ACCOUNT_ID" ]]; then
 fi
 
 if [[ -z "${OPENCLAW_SECRET_KEY:-}" ]]; then
+  [[ "$(type -t log_error 2>/dev/null)" == "function" ]] && log_error "preflight" 3 "OPENCLAW_SECRET_KEY not set"
   if $JSON_OUTPUT; then
     echo '{"success": false, "error": "OPENCLAW_SECRET_KEY environment variable is not set"}'
   else
@@ -63,6 +69,7 @@ fi
 encrypted=$(jq -r --arg id "$ACCOUNT_ID" '.accounts[$id].passwordEncrypted // empty' "$ACCOUNTS_FILE")
 
 if [[ -z "$encrypted" ]]; then
+  [[ "$(type -t log_error 2>/dev/null)" == "function" ]] && log_error "preflight" 3 "Account not found: $ACCOUNT_ID"
   if $JSON_OUTPUT; then
     echo "{\"success\": false, \"error\": \"Account '$ACCOUNT_ID' not found or has no passwordEncrypted field\"}"
   else
@@ -73,6 +80,7 @@ fi
 
 # Decrypt using AES-256-CBC
 plaintext=$(echo "$encrypted" | openssl enc -aes-256-cbc -d -a -pass "pass:$OPENCLAW_SECRET_KEY" 2>/dev/null) || {
+  [[ "$(type -t log_error 2>/dev/null)" == "function" ]] && log_error "preflight" 3 "Decryption failed for account: $ACCOUNT_ID"
   if $JSON_OUTPUT; then
     echo '{"success": false, "error": "Decryption failed. Check OPENCLAW_SECRET_KEY and encrypted value."}'
   else
@@ -82,6 +90,8 @@ plaintext=$(echo "$encrypted" | openssl enc -aes-256-cbc -d -a -pass "pass:$OPEN
 }
 
 if $JSON_OUTPUT; then
+  # Log success (do NOT log the password value)
+  [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 3 "Password decrypted successfully for account: $ACCOUNT_ID"
   # Output password in JSON; the caller must handle it securely
   jq -n --arg pw "$plaintext" '{"success": true, "password": $pw}'
 else

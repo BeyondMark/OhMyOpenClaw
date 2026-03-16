@@ -12,6 +12,7 @@ This document describes the exact browser navigation path for creating an email 
 - [Titan Admin Panel](#titan-admin-panel)
 - [Mailbox Creation](#mailbox-creation)
 - [Domain Switching (Batch)](#domain-switching-batch)
+- [Tab Management](#tab-management)
 
 ## Login Flow
 
@@ -33,6 +34,7 @@ openclaw browser snapshot --browser-profile <profile> --labels --efficient
 
 - **Logged in**: page contains text matching pattern `欢迎 ` (e.g., `欢迎 Yuan Jian !`)。注意 `!` 前有空格。已登录用户即使打开 login.php 也会看到 `欢迎` 文本。
 - **Not logged in**: page shows a login form（fields `txtUserName` / `txtPassword` visible）。
+- **Neither**（既没有 `欢迎` 也没有登录表单，如被重定向到首页）: 重新导航到 `https://www.hostclub.org/login.php`，然后再次检查。**最多重试 3 次**。如果 3 次后仍无法识别页面状态，返回 `failed`，error: `Unable to detect login state after 3 navigation attempts`。
 
 ### Step 3: Login (if needed)
 
@@ -60,17 +62,32 @@ openclaw browser fill --fields-file /tmp/login-fields.json --browser-profile <pr
 
 **不要**通过匹配"登录"文字来寻找提交按钮。页面顶部有 `登录/注册` 导航链接，模糊匹配会点到导航而非表单提交按钮。提交表单应使用 `HTMLFormElement.prototype.submit.call(form)` 或精确定位表单内的 `input[type=submit]`。
 
-登录后等待页面刷新，验证 `欢迎` 文本出现：
+#### 登录结果检测
+
+登录表单提交后，**不要仅依赖 `snapshot --labels --efficient`** 判断结果。精简 snapshot 可能不包含错误横幅文本（实测确认）。
+
+**检测流程**:
 
 ```bash
-openclaw browser snapshot --browser-profile <profile> --labels --efficient
-# 检查输出中是否包含 "欢迎"
+# 1. 等待页面加载（最多 5 秒）
+openclaw browser wait --time 5000 --browser-profile <profile>
+
+# 2. 用 evaluate 获取完整页面文本进行错误检测
+openclaw browser evaluate --fn "document.body.innerText" --browser-profile <profile>
 ```
 
-Watch for:
-- CAPTCHA challenges (image, slider, etc.) — cannot be automated, return `needs_human`.
-- 2FA prompts — cannot be automated, return `needs_human`.
-- "Account locked" or "Too many attempts" messages — return `failed`.
+**按以下顺序检查返回的页面文本**:
+
+| 匹配文本 | 判定 | 操作 |
+|----------|------|------|
+| `欢迎 ` | 登录成功 | 继续 Step 4 |
+| `无效的用户名或密码` / `invalid` | 密码错误 | **立即停止**，返回 `failed` |
+| `login attempts remaining` | 密码错误（含剩余次数警告） | **立即停止**，返回 `failed` |
+| `locked` / `锁定` | 账号锁定 | 返回 `needs_human` |
+| CAPTCHA 相关元素 / 验证码 | 需要人工验证 | 返回 `needs_human` |
+| 2FA / 短信验证 / 二次验证 | 需要人工验证 | 返回 `needs_human` |
+
+**绝对不要**在密码错误后重试登录 — 重复尝试会触发账号锁定（6 次失败后临时锁定）。
 
 ## Navigate to Domain
 
@@ -99,7 +116,24 @@ hostclub.org → CustomerIndexServlet?redirectpage=null&userLoginId=...&... → 
 
 **注意**: 跳转不是通过 `content.php?action=cp_login`，而是通过 `CustomerIndexServlet` 带 SSO token 的 URL。
 
-等待 `cp.hostclub.org` 管理中心完全加载：
+**SSO 跳转检测**（最多等待 15 秒，重试 2 次）：
+
+```bash
+# 1. 等待页面加载
+openclaw browser wait --time 5000 --browser-profile <profile>
+
+# 2. 检查当前 URL
+openclaw browser evaluate --fn "location.href" --browser-profile <profile>
+```
+
+| URL 检查结果 | 判定 | 操作 |
+|-------------|------|------|
+| 包含 `cp.hostclub.org` | SSO 成功 | 继续 Step 6 |
+| 仍是 `hostclub.org` | 跳转未发生 | 重试点击"我的账号"（最多 2 次） |
+| 其他 URL | 异常 | 返回 `failed`，error: `SSO redirect failed` |
+| 3 次尝试后仍未到 cp.hostclub.org | 超时 | 返回 `failed`，error: `SSO redirect to cp.hostclub.org timed out` |
+
+确认 URL 正确后取 snapshot：
 
 ```bash
 openclaw browser snapshot --browser-profile <profile> --labels --efficient
@@ -121,7 +155,16 @@ openclaw browser snapshot --browser-profile <profile> --labels --efficient
 openclaw browser type <search-ref> "example.com" --browser-profile <profile> --submit
 ```
 
-如果域名未找到，搜索可能返回空结果或错误信息。检查并报告失败。
+**多条搜索结果处理**:
+
+搜索可能返回多条订单（如域名管理 + Titan Email 分开列出）。处理策略：
+
+1. 优先点击包含 `Titan Email` 关键词的订单行
+2. 如果没有明确的 Titan 标识，点击第一条结果进入详情页
+3. 在详情页检查是否有 `Titan Email (Global)` 区块
+4. 如果当前详情页没有 Titan 区块，返回搜索结果尝试下一条
+
+如果所有结果都不包含 Titan 区块，或搜索返回"无法找到任何订单"，返回 `failed`，error: `Domain not found in account`。
 
 ## Email Status Detection
 
@@ -140,11 +183,26 @@ Three possible states:
 - No `Titan Email (Global)` section visible, OR
 - A `Start Free Trial Now` button is present.
 
-**Action**: Click `Start Free Trial Now` to activate the free trial.
+**Action (create mode only)**: Click `Start Free Trial Now` to activate the free trial.
 
 ```bash
 openclaw browser click <start-trial-ref> --browser-profile <profile>
 ```
+
+**激活等待条件**:
+
+```bash
+# 等待页面刷新（最多 30 秒）
+openclaw browser wait --time 10000 --browser-profile <profile>
+openclaw browser snapshot --browser-profile <profile> --labels --efficient
+```
+
+验证激活成功的标志：
+- `Business (Free Trial)` 文本出现
+- `TOTAL EMAIL ACCOUNTS` 文本出现
+- `Login to Webmail` 链接出现
+
+如果 30 秒内未看到上述标志，再次 snapshot 检查。最多等待 3 次（共 30 秒）。仍未激活则返回 `failed`，error: `Free trial activation timed out`。
 
 #### State B: Enabled (Trial Active)
 
@@ -167,10 +225,25 @@ openclaw browser click <start-trial-ref> --browser-profile <profile>
 
 **实际入口**: 点击 `Login to Webmail` 链接，跳转到 `https://mailhostbox.titan.email`。
 
+**⚠️ 重要: `Login to Webmail` 会在新标签页打开。必须切换标签页才能操作 Titan 面板。**
+
 ```bash
-# 找到 "Login to Webmail" 链接的 ref
+# 1. 记录当前标签页列表（保存 Hostclub 标签页的 targetId）
+openclaw browser tabs --browser-profile <profile>
+
+# 2. 点击 Login to Webmail
 openclaw browser snapshot --browser-profile <profile> --labels --efficient
 openclaw browser click <login-to-webmail-ref> --browser-profile <profile>
+
+# 3. 等待新标签页打开
+openclaw browser wait --time 3000 --browser-profile <profile>
+
+# 4. 获取更新后的标签页列表
+openclaw browser tabs --browser-profile <profile>
+# 新标签页应该包含 mailhostbox.titan.email
+
+# 5. 切换到 Titan 标签页
+openclaw browser focus <titan-tab-targetId> --browser-profile <profile>
 ```
 
 **不要**尝试点击 `Go to Admin Panel`（它是纯文本，不可交互）。
@@ -178,6 +251,14 @@ openclaw browser click <login-to-webmail-ref> --browser-profile <profile>
 ## Titan Admin Panel
 
 ### Step 9: Access Titan Panel
+
+> **前提**: 已通过 Step 8 切换到 Titan 标签页。
+
+在 Titan 标签页上执行 snapshot：
+
+```bash
+openclaw browser snapshot --browser-profile <profile> --labels --efficient
+```
 
 点击 `Login to Webmail` 后，浏览器跳转到 `mailhostbox.titan.email`（不是 `manage.titan.email`）。
 
@@ -187,8 +268,9 @@ openclaw browser click <login-to-webmail-ref> --browser-profile <profile>
 - **情况 B — 落在终端用户登录页**: URL 为 `mailhostbox.titan.email/login/` 或类似登录页面。此时无法枚举已有邮箱地址。
 
 ```bash
+# 检查 URL 和页面内容（确认已在 Titan 标签页上）：
+openclaw browser evaluate --fn "location.href" --browser-profile <profile>
 openclaw browser snapshot --browser-profile <profile> --labels --efficient
-# 检查 URL 和页面内容：
 # - 如果看到邮箱列表 → 情况 A，继续 Step 10
 # - 如果看到登录表单 → 情况 B，见下方降级处理
 ```
@@ -249,6 +331,25 @@ After form submission:
 
 When processing multiple domains under the same account, switch domains without logging out:
 
+### Step 14: Clean Up Titan Tab
+
+在切换到下一个域名之前，**必须先关闭当前域名的 Titan 标签页**（如果有），然后回到 Hostclub 标签页：
+
+```bash
+# 1. 获取标签页列表
+openclaw browser tabs --browser-profile <profile>
+
+# 2. 如果存在 Titan 标签页（URL 包含 mailhostbox.titan.email），关闭它
+openclaw browser close <titan-tab-targetId> --browser-profile <profile>
+
+# 3. 确认当前活跃标签页是 Hostclub（cp.hostclub.org）
+openclaw browser tabs --browser-profile <profile>
+# 如果不是，使用 focus 切回
+openclaw browser focus <hostclub-tab-targetId> --browser-profile <profile>
+```
+
+### Step 15: Switch Domain
+
 1. From the current domain's order detail page on `cp.hostclub.org`.
 2. 使用域名详情页上的 `跳转到域名` 搜索字段，或返回管理中心使用 `输入域名或订单号` 搜索字段。
 3. Enter the next domain name and submit.
@@ -263,3 +364,23 @@ openclaw browser type <jump-to-domain-ref> "next-domain.com" --browser-profile <
 ```
 
 Before each domain switch, re-verify login state. If the session expired (no `欢迎` text visible, or redirect to login page), re-authenticate before continuing.
+
+## Tab Management
+
+整个 skill 执行过程中需要管理的标签页：
+
+| 阶段 | 标签页 | 说明 |
+|------|--------|------|
+| Phase 2–3 | Hostclub 主标签页 | 登录、导航、域名搜索 |
+| Phase 4 Step 8 | Titan 新标签页 | `Login to Webmail` 打开 |
+| Phase 5 | Titan 标签页 | 邮箱列表、创建表单 |
+| Phase 6 | 回到 Hostclub 标签页 | 域名切换（batch） |
+
+**关键规则**:
+
+1. **`Login to Webmail` 总是在新标签页打开** — 点击后必须 `tabs` → `focus` 切换
+2. **操作完 Titan 面板后需要关闭该标签页** — 尤其在 batch 模式下，防止标签堆积
+3. **每次 snapshot/click/type 前确认在正确的标签页上** — 错误的标签页会导致 snapshot 内容不匹配
+4. **Hostclub 标签页的 targetId 在 Step 8 之前记录** — 方便后续切回
+
+标签切换命令速查见 `references/browser-commands.md` 的 "标签页管理工作流" 章节。

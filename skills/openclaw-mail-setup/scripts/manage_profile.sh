@@ -20,6 +20,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/log.sh" ]]; then
+  source "$SCRIPT_DIR/log.sh"
+fi
+
 ACTION=""
 PROFILE_NAME=""
 JSON_OUTPUT=false
@@ -69,8 +74,8 @@ fi
 case "$ACTION" in
   check)
     validate_name "$PROFILE_NAME"
-    # Check if profile exists — output format is "name: status (info)" or just "name"
     if openclaw browser profiles 2>/dev/null | grep -q "^${PROFILE_NAME}\(:\|$\)"; then
+      [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile exists: $PROFILE_NAME"
       if $JSON_OUTPUT; then
         echo "{\"success\": true, \"exists\": true, \"profileName\": \"$PROFILE_NAME\"}"
       else
@@ -78,6 +83,7 @@ case "$ACTION" in
       fi
       exit 0
     else
+      [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile not found: $PROFILE_NAME"
       if $JSON_OUTPUT; then
         echo "{\"success\": true, \"exists\": false, \"profileName\": \"$PROFILE_NAME\"}"
       else
@@ -89,22 +95,45 @@ case "$ACTION" in
 
   create)
     validate_name "$PROFILE_NAME"
+    _try_create() {
+      openclaw browser create-profile --name "$PROFILE_NAME" 2>&1
+    }
     if $JSON_OUTPUT; then
-      # Suppress CLI output in JSON mode to keep stdout pure JSON
-      if cli_output=$(openclaw browser create-profile --name "$PROFILE_NAME" 2>&1); then
+      if cli_output=$(_try_create); then
+        [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile created: $PROFILE_NAME"
         echo "{\"success\": true, \"created\": true, \"profileName\": \"$PROFILE_NAME\"}"
         exit 0
       else
-        echo "{\"success\": false, \"error\": \"Failed to create profile '$PROFILE_NAME'\"}"
-        exit 3
+        # Retry once after short delay (race condition after delete)
+        [[ "$(type -t log_warn 2>/dev/null)" == "function" ]] && log_warn "preflight" 6 "Profile creation failed, retrying after 2s" "{\"profile\":\"$PROFILE_NAME\"}"
+        sleep 2
+        if cli_output=$(_try_create); then
+          [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile created on retry: $PROFILE_NAME"
+          echo "{\"success\": true, \"created\": true, \"profileName\": \"$PROFILE_NAME\", \"retried\": true}"
+          exit 0
+        else
+          [[ "$(type -t log_error 2>/dev/null)" == "function" ]] && log_error "preflight" 6 "Profile creation failed after retry" "{\"profile\":\"$PROFILE_NAME\"}"
+          echo "{\"success\": false, \"error\": \"Failed to create profile '$PROFILE_NAME' (retried once)\"}"
+          exit 3
+        fi
       fi
     else
-      if openclaw browser create-profile --name "$PROFILE_NAME" 2>&1; then
+      if _try_create; then
+        [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile created: $PROFILE_NAME"
         echo "Profile '$PROFILE_NAME' created."
         exit 0
       else
-        echo "Error: Failed to create profile '$PROFILE_NAME'" >&2
-        exit 3
+        [[ "$(type -t log_warn 2>/dev/null)" == "function" ]] && log_warn "preflight" 6 "Profile creation failed, retrying after 2s" "{\"profile\":\"$PROFILE_NAME\"}"
+        sleep 2
+        if _try_create; then
+          [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "preflight" 6 "Profile created on retry: $PROFILE_NAME"
+          echo "Profile '$PROFILE_NAME' created (retried)."
+          exit 0
+        else
+          [[ "$(type -t log_error 2>/dev/null)" == "function" ]] && log_error "preflight" 6 "Profile creation failed after retry" "{\"profile\":\"$PROFILE_NAME\"}"
+          echo "Error: Failed to create profile '$PROFILE_NAME' (retried once)" >&2
+          exit 3
+        fi
       fi
     fi
     ;;

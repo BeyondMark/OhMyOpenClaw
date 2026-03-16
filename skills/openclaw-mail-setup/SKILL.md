@@ -139,7 +139,7 @@ In production mode (when account/domain tables exist **and** the caller does not
 
    - If the page contains text matching the pattern `欢迎 ` (e.g., `欢迎 Yuan Jian !`，注意 `!` 前有空格), the session is active. Skip to Phase 3.
    - If the page shows a login form (fields `txtUserName` / `txtPassword` visible), proceed with authentication.
-   - If the page shows neither (e.g., redirected to homepage with only a `登录/注册` link), navigate to `https://www.hostclub.org/login.php` first, then re-check.
+   - If the page shows neither (e.g., redirected to homepage with only a `登录/注册` link), navigate to `https://www.hostclub.org/login.php` first, then re-check. **最多重试 3 次**。如果 3 次后仍无法识别页面状态，返回 `failed`，error: `Unable to detect login state after 3 navigation attempts`。
    - Do not rely solely on cookies; always check rendered page content.
 
 9. If not logged in:
@@ -148,18 +148,21 @@ In production mode (when account/domain tables exist **and** the caller does not
    - 使用 `openclaw browser evaluate --fn` 或 `openclaw browser fill --fields-file` 方式，通过字段 name 属性（`txtUserName`, `txtPassword`）精确定位登录表单字段。详见 `references/browser-commands.md` 的 "处理 Ref 歧义" 章节。
    - **不要**通过匹配"登录"文字来寻找提交按钮——页面顶部有 `登录/注册` 导航链接，匹配文字会点到导航而非表单提交。应直接提交登录表单本身（`HTMLFormElement.prototype.submit.call(form)`）或精确定位表单内的提交按钮。
    - Submit the login form.
-   - Wait for the page to load and verify login succeeded (look for `欢迎` text).
-   - If login fails due to wrong credentials, stop immediately and return a `failed` result.
-   - If login fails due to account locked, stop and return a `needs_human` result (requires manual unlock).
-   - If a CAPTCHA or 2FA prompt appears, stop and return a `needs_human` result.
+   - Wait for the page to load.
+   - **登录结果检测**: 不要仅依赖 `snapshot --labels --efficient` 判断结果（精简 snapshot 可能不包含错误横幅文本，实测已确认）。必须使用 `openclaw browser evaluate --fn "document.body.innerText"` 获取完整页面文本，然后按以下优先级检查：
+     - 包含 `欢迎` → 登录成功，继续。
+     - 包含 `无效的用户名或密码` / `invalid` / `login attempts remaining` → 密码错误，**立即停止**，返回 `failed`。不要重试（重复尝试会触发账号锁定）。
+     - 包含 `locked` / `锁定` → 账号锁定，返回 `needs_human`。
+     - 出现 CAPTCHA / 验证码 / 2FA 提示 → 返回 `needs_human`。
+   - 详见 `references/hostclub-flow.md` Step 3 "登录结果检测" 章节。
 
 ### Phase 3: Navigate to Domain
 
 10. From the Hostclub homepage (logged in),进入账号管理区域。`欢迎 <用户名> !` 文本在 `<li>` 元素内不可直接点击，其内部包含 `我的账号` 链接 (`href="javascript:void(0)"`)。必须使用 `openclaw browser evaluate --fn` 方式点击该链接。详见 `references/hostclub-flow.md` Step 4。
 
-11. The system redirects through SSO token (`CustomerIndexServlet?redirectpage=null&userLoginId=...`) to `cp.hostclub.org`.
+11. The system redirects through SSO token (`CustomerIndexServlet?redirectpage=null&userLoginId=...`) to `cp.hostclub.org`. **SSO 跳转检测**: 等待页面加载后，用 `openclaw browser evaluate --fn "location.href"` 检查 URL。如果 URL 包含 `cp.hostclub.org` 则成功；如果仍在 `hostclub.org` 则重试点击"我的账号"（最多 2 次）；3 次尝试后仍未跳转则返回 `failed`，error: `SSO redirect to cp.hostclub.org timed out`。详见 `references/hostclub-flow.md` Step 5。
 
-12. On the `cp.hostclub.org` management center, locate the search field (placeholder: `输入域名或订单号`), enter the target domain, and navigate to the domain's order detail page. 在域名详情页上，还有一个 `跳转到域名` 搜索字段可用于域名间跳转。
+12. On the `cp.hostclub.org` management center, locate the search field (placeholder: `输入域名或订单号`), enter the target domain, and navigate to the domain's order detail page. 在域名详情页上，还有一个 `跳转到域名` 搜索字段可用于域名间跳转。**注意**: 搜索可能返回多条订单（如域名管理 + Titan Email 分开列出）。优先点击包含 `Titan Email` 关键词的订单行；如果没有明确标识，点击第一条结果进入后检查是否有 Titan 区块；详见 `references/hostclub-flow.md` Step 6。
 
 13. If the domain is not found in the account, stop and return a `failed` result with an appropriate error message.
 
@@ -177,15 +180,21 @@ In production mode (when account/domain tables exist **and** the caller does not
 
 17. **Create mode**: based on status:
 
-    - If not enabled: click `Start Free Trial Now`, wait for activation, then proceed to the Titan admin panel. When creation succeeds in this path, use status `trial_started` (not `created`) to distinguish first-time activation from subsequent creations.
+    - If not enabled: click `Start Free Trial Now`, wait for activation（最多 30 秒，每 10 秒 snapshot 检查 `Business (Free Trial)` 和 `Login to Webmail` 是否出现）。超时则返回 `failed`，error: `Free trial activation timed out`。激活成功后继续进入 Titan 面板。When creation succeeds in this path, use status `trial_started` (not `created`) to distinguish first-time activation from subsequent creations.
     - If enabled and quota not reached: click `Login to Webmail` 链接进入 Titan 管理面板（`mailhostbox.titan.email`）。**注意**: `Go to Admin Panel` 是纯文本标签，不可点击/不可交互，不要尝试点击它。
     - If quota reached: still click `Login to Webmail` to enter the Titan panel and check the existing mailbox list. If `mailboxName@domain` is already in the list, return `already_exists`. If the target mailbox is not in the list, return `quota_reached`.
+
+    **⚠️ 标签页切换**: `Login to Webmail` 会在新标签页打开 Titan 面板。点击后必须执行以下步骤才能操作 Titan 页面：
+    1. `openclaw browser tabs` — 获取标签页列表
+    2. `openclaw browser focus <titan-tab-targetId>` — 切换到 Titan 标签页
+    3. 在 Titan 标签页上执行 snapshot
+    详见 `references/hostclub-flow.md` Step 8 和 `references/browser-commands.md` "标签页管理工作流" 章节。
 
 ### Phase 5: Idempotency Check and Mailbox Creation (Create Mode Only)
 
 > This phase is skipped entirely in query mode.
 
-18. Verify Titan panel access. `Login to Webmail` 不一定直接进入管理面板，可能落在 `mailhostbox.titan.email/login/` 终端用户登录页。详见 `references/hostclub-flow.md` Step 9。
+18. Verify Titan panel access. **前提**: 已通过 Step 17 切换到 Titan 标签页。`Login to Webmail` 不一定直接进入管理面板，可能落在 `mailhostbox.titan.email/login/` 终端用户登录页。用 `openclaw browser evaluate --fn "location.href"` 确认 URL，详见 `references/hostclub-flow.md` Step 9。
 
     - **管理面板可达**: URL 显示邮箱列表页面 → 设 `adminPanelAccessible=true`，继续步骤 19。
     - **管理面板不可达（登录页）**: 设 `adminPanelAccessible=false`。此时无法枚举已有邮箱，依据 Phase 4 获取的配额判断：配额已满返回 `quota_reached`，配额未满可尝试创建但无法做精确幂等性检查。
@@ -217,7 +226,7 @@ In production mode (when account/domain tables exist **and** the caller does not
 
 ### Phase 6: Result Reporting
 
-21. If in config mode, update the domain table:
+23. If in config mode, update the domain table:
 
     ```bash
     ./scripts/update_domain_status.sh \
@@ -229,7 +238,9 @@ In production mode (when account/domain tables exist **and** the caller does not
 
     The script also records `mailboxCreatedAt` (ISO 8601 timestamp) for successful creations.
 
-22. Return the structured result (see Output Structure below).
+24. Return the structured result (see Output Structure below).
+
+25. **Tab cleanup**: 如果在 Phase 4/5 中打开了 Titan 标签页，关闭它并确认回到 Hostclub 标签页（或原始标签页）。在 batch 模式下这是切换到下一个域名的前提。详见 `references/hostclub-flow.md` Step 14。
 
 ## Error Handling
 
@@ -416,6 +427,81 @@ Production environments should implement a profile-level lock to enforce serial 
 - Do not attempt to create a mailbox if quota is reached — check first.
 - If login state detection is ambiguous, re-authenticate rather than proceeding with a potentially invalid session.
 
+## Tab Management
+
+`Login to Webmail` 链接始终在新标签页打开 Titan Email 面板。执行过程中必须主动管理标签页。
+
+### 核心规则
+
+1. **点击 `Login to Webmail` 后立即切换标签页**: `openclaw browser tabs` → `openclaw browser focus <titan-tab>`
+2. **操作完 Titan 面板后关闭该标签页**: `openclaw browser close <titan-tab>`（batch 模式下必需，防止标签堆积）
+3. **每次 snapshot/click/type 前确认在正确的标签页**: 错误的标签页会导致元素不匹配
+4. **记录 Hostclub 标签页的 targetId**: 在 Step 17 点击 `Login to Webmail` 之前记录，方便后续切回
+
+### 标签页生命周期
+
+```
+Phase 1–3: [Hostclub 标签页] (唯一)
+Phase 4 Step 17: [Hostclub] → 点击 Login to Webmail → [Hostclub, Titan(新)]
+                  → tabs → focus Titan
+Phase 5: [Hostclub, Titan(活跃)] — 操作 Titan 面板
+Phase 6 Step 25: close Titan → [Hostclub(活跃)]
+Batch 切换: 回到 Hostclub 搜索下一个域名
+```
+
+详见 `references/hostclub-flow.md` "Tab Management" 章节和 `references/browser-commands.md` "标签页管理工作流" 章节。
+
+## Logging
+
+所有执行过程通过日志系统记录关键决策点和操作结果，方便排查问题。
+
+### Session 初始化
+
+每次执行开始时生成一个 session ID，格式为 `mail-{domain}-{YYYYMMDD-HHMMSS}`。后续所有日志调用使用同一 session ID。
+
+### Agent 日志记录
+
+Agent 在关键步骤调用 `session_log.sh` 记录决策点：
+
+```bash
+./scripts/session_log.sh \
+  --session <session-id> \
+  --domain <domain> \
+  --phase <phase-name> \
+  --step <step-number> \
+  --level <INFO|WARN|ERROR> \
+  --msg <message> \
+  [--data <json-object>] \
+  --json
+```
+
+Phase 名称: `preflight` / `login` / `navigate` / `email-status` / `create` / `result`
+
+### 必须记录的关键决策点
+
+| Phase | Step | 事件 |
+|-------|------|------|
+| preflight | 2 | 凭证模式确定（direct/config） |
+| login | 8 | 登录态检测结果 |
+| login | 9 | 登录成功/失败 |
+| navigate | 11 | SSO 跳转结果 |
+| navigate | 12 | 域名搜索结果 |
+| email-status | 15 | Email 状态判定 |
+| email-status | 17 | 标签切换到 Titan |
+| create | 18 | Titan 面板访问结果 |
+| create | 21 | 邮箱创建结果 |
+| result | 24 | 最终结果 |
+
+### 脚本自动记录
+
+所有 `scripts/` 下的脚本已集成 `log.sh`，会自动记录各自的操作结果到同一 session 日志文件。
+
+### 日志文件
+
+日志文件路径: `~/.openclaw/mail/logs/{session-id}.jsonl`
+
+格式为 JSONL（每行一条 JSON 对象），可用 `jq` 查询。详见 `references/logging.md`。
+
 ## Profile Naming Convention
 
 Profile names only allow lowercase letters, digits, and hyphens. No underscores.
@@ -433,6 +519,8 @@ Examples: `hostclub-001`, `hostclub-002`, `namesilo-001`
 
 ### scripts/
 
+- `scripts/log.sh`: shared logging library, sourced by all other scripts (JSONL output)
+- `scripts/session_log.sh`: standalone logging script for agent to call at key decision points
 - `scripts/check_config.sh`: validate account table and domain table exist and are well-formed
 - `scripts/decrypt_password.sh`: decrypt AES-256-CBC encrypted password using `OPENCLAW_SECRET_KEY`
 - `scripts/generate_mailbox_password.sh`: generate a strong mailbox password for newly created Titan accounts
@@ -444,3 +532,4 @@ Examples: `hostclub-001`, `hostclub-002`, `namesilo-001`
 - `references/hostclub-flow.md`: step-by-step Hostclub/Titan navigation flow with element selectors
 - `references/browser-commands.md`: OpenClaw browser CLI 命令速查和 ref 歧义处理指南
 - `references/config-schema.md`: account table and domain table JSON schemas with examples
+- `references/logging.md`: 日志系统使用指南、格式定义和排查示例

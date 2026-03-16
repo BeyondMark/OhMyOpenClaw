@@ -23,6 +23,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/log.sh" ]]; then
+  source "$SCRIPT_DIR/log.sh"
+fi
+
 CONFIG_DIR="${OPENCLAW_MAIL_CONFIG_DIR:-$HOME/.openclaw/mail}"
 DOMAINS_FILE="$CONFIG_DIR/domains.json"
 DOMAIN=""
@@ -107,6 +112,7 @@ jq --arg d "$DOMAIN" \
    "$DOMAINS_FILE" > "$tmp_file" && mv "$tmp_file" "$DOMAINS_FILE"
 
 if [[ $? -eq 0 ]]; then
+  [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "result" 23 "Domain status updated" "{\"domain\":\"$DOMAIN\",\"status\":\"$STATUS\"}"
   if $JSON_OUTPUT; then
     echo "{\"success\": true, \"domain\": \"$DOMAIN\", \"status\": \"$STATUS\", \"updatedAt\": \"$NOW\"}"
   else
@@ -114,6 +120,7 @@ if [[ $? -eq 0 ]]; then
   fi
   exit 0
 else
+  [[ "$(type -t log_error 2>/dev/null)" == "function" ]] && log_error "result" 23 "Failed to write domains.json" "{\"domain\":\"$DOMAIN\"}"
   if $JSON_OUTPUT; then
     echo '{"success": false, "error": "Failed to write domains.json"}'
   else
