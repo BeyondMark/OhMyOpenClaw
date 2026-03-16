@@ -148,7 +148,9 @@ openclaw browser close <targetId> --browser-profile <profile>
 
 ### 标签页管理工作流
 
-`Login to Webmail` 链接会在新标签页打开 Titan Email 面板。必须主动切换标签页才能操作新页面。
+`Go to Admin Panel` 按钮会在新标签页打开 Titan Email 管理面板（`manage.titan.email`）。必须主动切换标签页才能操作新页面。
+
+**注意**: `Go to Admin Panel` 在 closed shadow DOM 内，OpenClaw 的 `snapshot --labels --efficient` 可能不会为其分配 ref。如果找不到 ref，需要通过 Playwright 的 `getByText('Go to Admin Panel')` 来点击。
 
 **进入 Titan 面板**:
 
@@ -157,12 +159,21 @@ openclaw browser close <targetId> --browser-profile <profile>
 openclaw browser tabs --browser-profile <profile>
 # 输出示例:
 #   [0] (active) https://cp.hostclub.org/servlet/ViewDomainServlet?...  targetId=ABC111
-#   [1] https://mailhostbox.titan.email/...  targetId=DEF222
 
-# 2. 切换到 Titan 标签页
+# 2. 点击 "Go to Admin Panel"（通过 snapshot ref 或 Playwright getByText）
+# 新标签页打开 manage.titan.email/partner/autoLogin?...jwt=...（JWT 自动认证）
+
+# 3. 等待新标签页打开并获取标签页列表
+openclaw browser wait --time 3000 --browser-profile <profile>
+openclaw browser tabs --browser-profile <profile>
+# 输出示例:
+#   [0] (active) https://cp.hostclub.org/servlet/ViewDomainServlet?...  targetId=ABC111
+#   [1] https://manage.titan.email/email-accounts  targetId=DEF222
+
+# 4. 切换到 Titan 标签页
 openclaw browser focus DEF222 --browser-profile <profile>
 
-# 3. 在 Titan 标签页上操作
+# 5. 在 Titan 标签页上操作
 openclaw browser snapshot --browser-profile <profile> --labels --efficient
 ```
 
@@ -258,4 +269,35 @@ openclaw browser evaluate --fn "document.body.innerText" --browser-profile <prof
 
 # 方式 2: 使用 aria 格式的完整 snapshot
 openclaw browser snapshot --browser-profile <profile> --format aria
+```
+
+### Closed Shadow DOM 内的元素无法通过 JS 直接访问
+
+Hostclub 域名详情页上的 Titan Email 小部件渲染在 closed shadow DOM 内。这意味着：
+
+- `document.querySelector()` 和 `document.body.innerHTML` **无法**找到这些元素
+- `evaluate --fn` 中的任何 DOM 选择器都**无法**访问
+- 但 `snapshot`（accessibility tree）**可以**看到这些元素（可能显示为纯文本）
+- Playwright 的 `getByText()` / `getByRole()` **可以**定位并点击这些元素
+
+**受影响的元素**:
+- `Go to Admin Panel` (`<span class="wp-btn-blue-hollow">`，可点击，cursor: pointer)
+- `MANAGE EMAIL ACCOUNTS` (纯文本标题)
+- `TOTAL EMAIL ACCOUNTS` 和配额显示
+- `Create Email` 文本
+- `DNS Records` / `View Details` 链接
+
+**解决方案**:
+
+```bash
+# ❌ 错误: evaluate 无法访问 closed shadow DOM
+openclaw browser evaluate --fn "document.querySelector('.wp-btn-blue-hollow').click()" --browser-profile <profile>
+
+# ✅ 方式 1: 使用 snapshot ref（如果有分配）
+openclaw browser snapshot --browser-profile <profile> --labels
+openclaw browser click <ref> --browser-profile <profile>
+
+# ✅ 方式 2: 使用 Playwright getByText（推荐）
+# 在 agent 中通过 Playwright MCP 工具调用:
+# page.getByText('Go to Admin Panel').click()
 ```

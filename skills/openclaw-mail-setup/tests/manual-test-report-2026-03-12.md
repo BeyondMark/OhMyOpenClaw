@@ -348,3 +348,81 @@ https://mailhostbox.titan.email/login/
 - `visionate.net` 这个测试域名前提已失效
 - `wavelengthpulsmk.com` 真实存在，Titan 试用已开通且额度已满
 - `Login to Webmail` 落在终端用户登录页，无法稳定做幂等性枚举
+
+---
+
+## 第三轮测试（按更新后的 eval 重新验证）
+
+### 说明
+
+- 本轮按照更新后的 `tests/evals.json` 重新验证
+- 测试前仍然删除并重建 `hostclub-001`，但这仅作为测试环境清理动作，不应视为生产流程要求
+
+### 本轮结果摘要
+
+- `check_config.sh --json` 仍返回 `not_found`，确认 direct mode
+- 登录成功，出现 `欢迎 Yuan Jian !`
+- 成功进入 `cp.hostclub.org`
+- 成功进入 `wavelengthpulsmk.com` 域名详情页
+- `Titan Email (Global)` 区块可见：
+  - `Business (Free Trial)`
+  - `1/1 Account(s)`
+  - `Login to Webmail`
+- 点击 `Login to Webmail` 后，新标签页落在：
+
+```text
+https://mailhostbox.titan.email/login/
+```
+
+- 该页面是终端用户邮箱登录页，不是管理员邮箱列表页
+
+### 对更新后 eval 的验证结论
+
+- 第 1 个 eval：
+  更新后的 `quota_reached / mailboxPassword: null` 预期，与本轮真实结果一致
+
+- 第 2 个 eval：
+  当前真实环境下命中的是 `adminPanelAccessible=false` 的降级分支，因此结果应为 `quota_reached`，这与更新后的说明一致
+
+- 第 3 个 eval：
+  当前真实环境下也应返回 `quota_reached`，与更新后的说明一致
+
+### 本轮新增问题
+
+### 问题 8：域名跳转表单更适合真实点击提交，不适合直接 `form.submit()`
+
+现象：
+
+- 在管理中心对 `#jump-to-domain-input` 直接执行 `HTMLFormElement.prototype.submit.call(form)` 时，出现过请求参数异常，最终搜索结果不稳定
+- 改为：
+  1. 先设置 `#jump-to-domain-input` 的值
+  2. 再点击 `#jump-to-domain-submit-button`
+  即可稳定进入目标域名详情页
+
+影响：
+
+- 如果 skill 在 Phase 3 里对该表单使用裸 `form.submit()`，域名跳转可能偶发失败或产生异常查询参数
+
+建议：
+
+- `cp.hostclub.org` 的域名跳转优先使用“填写输入框 + 点击提交按钮”的方式
+- 不要把登录页的提交策略直接复用到控制台里的域名跳转表单
+
+### 本轮结构化结果（按真实页面推断）
+
+```json
+{
+  "success": false,
+  "mode": "create",
+  "status": "quota_reached",
+  "createdMailbox": null,
+  "mailboxPassword": null,
+  "emailEnabled": true,
+  "trialStarted": true,
+  "adminPanelAccessible": false,
+  "existingMailboxes": [],
+  "mailboxQuotaReached": true,
+  "canCreateAnotherMailbox": false,
+  "error": null
+}
+```

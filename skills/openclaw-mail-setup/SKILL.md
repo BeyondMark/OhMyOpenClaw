@@ -180,11 +180,11 @@ In production mode (when account/domain tables exist **and** the caller does not
 
 17. **Create mode**: based on status:
 
-    - If not enabled: click `Start Free Trial Now`, wait for activation（最多 30 秒，每 10 秒 snapshot 检查 `Business (Free Trial)` 和 `Login to Webmail` 是否出现）。超时则返回 `failed`，error: `Free trial activation timed out`。激活成功后继续进入 Titan 面板。When creation succeeds in this path, use status `trial_started` (not `created`) to distinguish first-time activation from subsequent creations.
-    - If enabled and quota not reached: click `Login to Webmail` 链接进入 Titan 管理面板（`mailhostbox.titan.email`）。**注意**: `Go to Admin Panel` 是纯文本标签，不可点击/不可交互，不要尝试点击它。
-    - If quota reached: still click `Login to Webmail` to enter the Titan panel and check the existing mailbox list. If `mailboxName@domain` is already in the list, return `already_exists`. If the target mailbox is not in the list, return `quota_reached`.
+    - If not enabled: click `Start Free Trial Now`, wait for activation（最多 30 秒，每 10 秒 snapshot 检查 `Business (Free Trial)` 和 `Go to Admin Panel` 是否出现）。超时则返回 `failed`，error: `Free trial activation timed out`。激活成功后继续进入 Titan 面板。When creation succeeds in this path, use status `trial_started` (not `created`) to distinguish first-time activation from subsequent creations.
+    - If enabled and quota not reached: 点击 `Go to Admin Panel` 按钮进入 Titan 管理面板（`manage.titan.email`）。该按钮位于 `MANAGE EMAIL ACCOUNTS` 区块内，是 `<span class="wp-btn-blue-hollow">` 元素，`cursor: pointer`，**可点击**。它在 closed shadow DOM 内，常规 `document.querySelector` 无法找到，必须通过 Playwright 的 `getByText('Go to Admin Panel')` 或 OpenClaw snapshot ref 来定位。**注意**: `Login to Webmail` 链接指向 `mailhostbox.titan.email`（终端用户邮箱登录页），**不要**用它来进入管理面板。
+    - If quota reached: still click `Go to Admin Panel` to enter the Titan admin panel and check the existing mailbox list. If `mailboxName@domain` is already in the list, return `already_exists`. If the target mailbox is not in the list, return `quota_reached`.
 
-    **⚠️ 标签页切换**: `Login to Webmail` 会在新标签页打开 Titan 面板。点击后必须执行以下步骤才能操作 Titan 页面：
+    **⚠️ 标签页切换**: `Go to Admin Panel` 会在新标签页打开 Titan 管理面板（URL: `manage.titan.email/partner/autoLogin?partnerId=...&jwt=...`，通过 JWT 自动认证，无需单独登录）。点击后必须执行以下步骤才能操作 Titan 页面：
     1. `openclaw browser tabs` — 获取标签页列表
     2. `openclaw browser focus <titan-tab-targetId>` — 切换到 Titan 标签页
     3. 在 Titan 标签页上执行 snapshot
@@ -194,10 +194,10 @@ In production mode (when account/domain tables exist **and** the caller does not
 
 > This phase is skipped entirely in query mode.
 
-18. Verify Titan panel access. **前提**: 已通过 Step 17 切换到 Titan 标签页。`Login to Webmail` 不一定直接进入管理面板，可能落在 `mailhostbox.titan.email/login/` 终端用户登录页。用 `openclaw browser evaluate --fn "location.href"` 确认 URL，详见 `references/hostclub-flow.md` Step 9。
+18. Verify Titan panel access. **前提**: 已通过 Step 17 切换到 Titan 标签页。`Go to Admin Panel` 通过 JWT 自动认证，正常情况下会直接进入 `manage.titan.email/email-accounts` 管理面板。用 `openclaw browser evaluate --fn "location.href"` 确认 URL，详见 `references/hostclub-flow.md` Step 9。
 
-    - **管理面板可达**: URL 显示邮箱列表页面 → 设 `adminPanelAccessible=true`，继续步骤 19。
-    - **管理面板不可达（登录页）**: 设 `adminPanelAccessible=false`。此时无法枚举已有邮箱，依据 Phase 4 获取的配额判断：配额已满返回 `quota_reached`，配额未满可尝试创建但无法做精确幂等性检查。
+    - **管理面板可达**: URL 包含 `manage.titan.email` 且显示邮箱列表页面 → 设 `adminPanelAccessible=true`，继续步骤 19。
+    - **管理面板不可达（JWT 过期或异常）**: 设 `adminPanelAccessible=false`。此时无法枚举已有邮箱，依据 Phase 4 获取的配额判断：配额已满返回 `quota_reached`，配额未满可尝试创建但无法做精确幂等性检查。
 
 19. In the Titan admin panel, check the existing mailbox list (仅当 `adminPanelAccessible=true`).
 
@@ -219,8 +219,11 @@ In production mode (when account/domain tables exist **and** the caller does not
 
     - Click the create new mailbox button (`新建邮箱帐户`).
     - Fill in the mailbox creation form with `mailboxName`, the generated password, and any required fields.
-    - Submit the form.
-    - Wait for confirmation that creation succeeded.
+      - **邮箱** 输入框 (placeholder: "e.g John"): 填入 `mailboxName`。域名后缀 `@domain` 会自动显示。
+      - **密码** 输入框 (placeholder: "最少8个字符。"): 填入生成的密码。
+      - **密码恢复邮箱地址** (可选): 可留空。
+    - Submit the form by clicking `创建新帐户` button.
+    - Wait for confirmation dialog showing `创建成功！`。
 
 22. If the creation form shows an upgrade prompt instead of a usable form, the quota is actually reached. Return `quota_reached`.
 
@@ -429,25 +432,34 @@ Production environments should implement a profile-level lock to enforce serial 
 
 ## Tab Management
 
-`Login to Webmail` 链接始终在新标签页打开 Titan Email 面板。执行过程中必须主动管理标签页。
+`Go to Admin Panel` 按钮始终在新标签页打开 Titan Email 管理面板。执行过程中必须主动管理标签页。
 
 ### 核心规则
 
-1. **点击 `Login to Webmail` 后立即切换标签页**: `openclaw browser tabs` → `openclaw browser focus <titan-tab>`
+1. **点击 `Go to Admin Panel` 后立即切换标签页**: `openclaw browser tabs` → `openclaw browser focus <titan-tab>`
 2. **操作完 Titan 面板后关闭该标签页**: `openclaw browser close <titan-tab>`（batch 模式下必需，防止标签堆积）
 3. **每次 snapshot/click/type 前确认在正确的标签页**: 错误的标签页会导致元素不匹配
-4. **记录 Hostclub 标签页的 targetId**: 在 Step 17 点击 `Login to Webmail` 之前记录，方便后续切回
+4. **记录 Hostclub 标签页的 targetId**: 在 Step 17 点击 `Go to Admin Panel` 之前记录，方便后续切回
 
 ### 标签页生命周期
 
 ```
 Phase 1–3: [Hostclub 标签页] (唯一)
-Phase 4 Step 17: [Hostclub] → 点击 Login to Webmail → [Hostclub, Titan(新)]
+Phase 4 Step 17: [Hostclub] → 点击 Go to Admin Panel → [Hostclub, Titan(新)]
                   → tabs → focus Titan
 Phase 5: [Hostclub, Titan(活跃)] — 操作 Titan 面板
 Phase 6 Step 25: close Titan → [Hostclub(活跃)]
 Batch 切换: 回到 Hostclub 搜索下一个域名
 ```
+
+### 两个入口的区别
+
+| 入口 | 目标 URL | 用途 |
+|------|----------|------|
+| `Go to Admin Panel` | `manage.titan.email/partner/autoLogin?...jwt=...` | **管理面板**（JWT 自动认证，可创建/管理邮箱） |
+| `Login to Webmail` | `mailhostbox.titan.email` | **终端用户邮箱登录页**（需要邮箱密码登录，不能管理邮箱） |
+
+**始终使用 `Go to Admin Panel` 进入 Titan 管理面板，不要使用 `Login to Webmail`。**
 
 详见 `references/hostclub-flow.md` "Tab Management" 章节和 `references/browser-commands.md` "标签页管理工作流" 章节。
 
