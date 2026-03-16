@@ -20,6 +20,10 @@ When referring to bundled files, resolve paths relative to this skill directory.
 
 如果 Playwright MCP 不可用（agent 尝试调用 `browser_navigate` 等工具时报错），应提示用户安装对应的 Playwright 依赖，然后重试。
 
+### 绝对禁止规则
+
+> **🚫 禁止点击 `Login to Webmail`** — 在整个 skill 执行过程中，**任何情况下**都不得点击 `Login to Webmail` 链接。它指向 `mailhostbox.titan.email`（终端用户邮箱登录页），无法创建或管理邮箱。进入 Titan 管理面板的**唯一正确入口**是 `Go to Admin Panel` 按钮。如果 snapshot 中同时出现这两个元素，**只点击 `Go to Admin Panel`，忽略 `Login to Webmail`**。
+
 ### 职责划分
 
 This skill owns the decision-making layer:
@@ -251,7 +255,7 @@ In production mode (when account/domain tables exist **and** the caller does not
 
       详见 `references/hostclub-flow.md` Step 7 State A 的完整轮询流程。
 
-    - If enabled and quota not reached (used < total): 用 `browser_click` 点击 `Go to Admin Panel` 按钮进入 Titan 管理面板（`manage.titan.email`）。该按钮位于 `MANAGE EMAIL ACCOUNTS` 区块内，在 closed shadow DOM 内渲染，但 **Playwright snapshot 可以直接获取其 ref 并点击**，无需特殊处理。**注意**: `Login to Webmail` 链接指向 `mailhostbox.titan.email`（终端用户邮箱登录页），**不要**用它来进入管理面板。
+    - If enabled and quota not reached (used < total): 用 `browser_click` 点击 **`Go to Admin Panel`** 按钮进入 Titan 管理面板（`manage.titan.email`）。该按钮位于 `MANAGE EMAIL ACCOUNTS` 区块内，Playwright snapshot 可以直接获取其 ref 并点击。**🚫 禁止点击 `Login to Webmail`** — snapshot 中会同时出现这两个元素，只点击 `Go to Admin Panel`。
     - If quota reached: still click `Go to Admin Panel` to enter the Titan admin panel and check the existing mailbox list. If `mailboxName@domain` is already in the list, return `already_exists`. If the target mailbox is not in the list, return `quota_reached`.
 
     **⚠️ 标签页切换**: `Go to Admin Panel` 会在新标签页打开 Titan 管理面板（URL: `manage.titan.email/partner/autoLogin?partnerId=...&jwt=...`，通过 JWT 自动认证，无需单独登录）。点击后必须执行以下步骤才能操作 Titan 页面：
