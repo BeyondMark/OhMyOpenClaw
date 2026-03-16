@@ -75,8 +75,9 @@ if ! [[ "$STEP" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-# Validate level
-case "${LEVEL^^}" in
+# Validate level (bash 3.2 compatible — no ${^^})
+LEVEL="$(printf '%s' "$LEVEL" | tr '[:lower:]' '[:upper:]')"
+case "$LEVEL" in
   DEBUG|INFO|WARN|ERROR) ;;
   *)
     echo "Error: --level must be DEBUG, INFO, WARN, or ERROR" >&2
@@ -93,8 +94,8 @@ source "$SCRIPT_DIR/log.sh"
 log_init --domain "$DOMAIN" --session "$SESSION"
 log_set_script "session_log.sh"
 
-# Write the log entry
-case "${LEVEL^^}" in
+# Write the log entry (LEVEL already uppercased above)
+case "$LEVEL" in
   DEBUG) log_debug "$PHASE" "$STEP" "$MSG" "$DATA" ;;
   INFO)  log_info  "$PHASE" "$STEP" "$MSG" "$DATA" ;;
   WARN)  log_warn  "$PHASE" "$STEP" "$MSG" "$DATA" ;;

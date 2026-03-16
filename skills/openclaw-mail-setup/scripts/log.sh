@@ -32,9 +32,11 @@ _LOG_SESSION=""
 _LOG_DOMAIN=""
 _LOG_SCRIPT_NAME=""
 
-# Level to numeric for comparison
+# Level to numeric for comparison (bash 3.2 compatible — no ${^^})
 _log_level_num() {
-  case "${1^^}" in
+  local _lvl
+  _lvl="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
+  case "$_lvl" in
     DEBUG) echo 0 ;;
     INFO)  echo 1 ;;
     WARN)  echo 2 ;;
