@@ -99,6 +99,7 @@ done
 [[ "$(type -t log_info 2>/dev/null)" == "function" ]] && log_info "create" 21 "Mailbox password generated" "{\"length\":$LENGTH}"
 
 if $JSON_OUTPUT; then
+  jq -n --arg password "$password" --argjson length "$LENGTH" \
     '{success: true, password: $password, length: $length}'
 else
   echo "$password"
