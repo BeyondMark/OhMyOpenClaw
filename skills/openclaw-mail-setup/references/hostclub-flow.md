@@ -90,27 +90,32 @@ code: |
 工具: browser_run_code
 code: |
   async (page) => {
-    await page.locator('input[name=txtUserName]').fill('<username>');
-    await page.locator('input[name=txtPassword]').fill('<password>');
+    const userField = page.locator('input[name=txtUserName]');
+    const passField = page.locator('input[name=txtPassword]');
+    const expectedUser = '<username>';
+    const expectedPass = '<password>';
 
-    // 提交前验证：确认值已正确写入登录表单字段
-    const actualUser = await page.locator('input[name=txtUserName]').inputValue();
-    const actualPass = await page.locator('input[name=txtPassword]').inputValue();
-    if (actualUser !== '<username>' || actualPass !== '<password>') {
-      return { error: 'Fill verification failed', actualUser, actualPass };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await userField.fill(expectedUser);
+      await passField.fill(expectedPass);
+
+      const actualUser = await userField.inputValue();
+      const actualPass = await passField.inputValue();
+      if (actualUser === expectedUser && actualPass === expectedPass) {
+        await userField.evaluate(el =>
+          HTMLFormElement.prototype.submit.call(el.form)
+        );
+        return { submitted: true, attempt };
+      }
+      await userField.clear();
+      await passField.clear();
     }
-
-    await page.locator('input[name=txtUserName]').evaluate(el =>
-      HTMLFormElement.prototype.submit.call(el.form)
-    );
-    return { submitted: true };
+    return { submitted: false, error: 'Fill verification failed after 3 attempts' };
   }
 ```
 
-- `input[name=txtUserName]` — 登录表单邮箱字段（唯一）
-- `input[name=txtPassword]` — 登录表单密码字段（唯一）
-- `inputValue()` 读回验证 — 确保凭证写入了正确字段，不一致则停止，**不提交**
-- `HTMLFormElement.prototype.submit.call(el.form)` — 绕过表单内 `name="submit"` 按钮对 `form.submit()` 的覆盖
+- `inputValue()` 回读验证 — 不一致则清空重填，最多 3 次
+- 3 次都失败才返回错误，**不提交错误凭证**
 
 **不要**使用以下方式:
 - `browser_fill_form` — 可能匹配隐藏注册字段

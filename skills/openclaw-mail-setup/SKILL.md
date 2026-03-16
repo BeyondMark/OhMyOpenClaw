@@ -197,24 +197,32 @@ In production mode (when account/domain tables exist **and** the caller does not
     工具: browser_run_code
     code: |
       async (page) => {
-        await page.locator('input[name=txtUserName]').fill('<username>');
-        await page.locator('input[name=txtPassword]').fill('<password>');
+        const userField = page.locator('input[name=txtUserName]');
+        const passField = page.locator('input[name=txtPassword]');
+        const expectedUser = '<username>';
+        const expectedPass = '<password>';
 
-        // 提交前验证：确认值已正确写入登录表单字段
-        const actualUser = await page.locator('input[name=txtUserName]').inputValue();
-        const actualPass = await page.locator('input[name=txtPassword]').inputValue();
-        if (actualUser !== '<username>' || actualPass !== '<password>') {
-          return { error: 'Fill verification failed', actualUser, actualPass };
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await userField.fill(expectedUser);
+          await passField.fill(expectedPass);
+
+          const actualUser = await userField.inputValue();
+          const actualPass = await passField.inputValue();
+          if (actualUser === expectedUser && actualPass === expectedPass) {
+            await userField.evaluate(el =>
+              HTMLFormElement.prototype.submit.call(el.form)
+            );
+            return { submitted: true, attempt };
+          }
+          // 值不对，清空重填
+          await userField.clear();
+          await passField.clear();
         }
-
-        await page.locator('input[name=txtUserName]').evaluate(el =>
-          HTMLFormElement.prototype.submit.call(el.form)
-        );
-        return { submitted: true };
+        return { submitted: false, error: 'Fill verification failed after 3 attempts' };
       }
     ```
 
-    **提交前验证**: 通过 `inputValue()` 读回实际值，与预期值比对。如果不一致说明填入了错误的字段，必须停止并报错，**绝对不要带着错误凭证提交**（会触发账号锁定）。
+    **提交前验证**: 通过 `inputValue()` 读回实际值与预期比对。如果不一致，清空字段重新填写，最多重试 3 次。3 次都失败则返回错误，**绝对不要带着错误凭证提交**（会触发账号锁定）。
 
     **为什么必须用 `input[name=...]` 定位**: 登录页面 HTML 中同时存在登录表单和隐藏的注册表单（共 22 个 input 字段）。`txtUserName` 和 `txtPassword` 是登录表单的唯一字段名。使用 snapshot ref 或 `browser_fill_form` 可能匹配到隐藏的注册表单字段（如 `name="email"`, `name="passwd"`），导致登录失败。
 
